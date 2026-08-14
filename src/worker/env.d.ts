@@ -22,4 +22,15 @@ interface Env {
    *  Unset = any Google-verified email is trusted. See
    *  src/worker/auth/google.ts. */
   ALLOWED_EMAILS?: string;
+  /** Telegram bot token (from @BotFather) used to push needs-human pings
+   *  and the daily digest. Optional — unset means notifications are
+   *  silently skipped (see src/worker/notify/telegram.ts). Create a
+   *  dedicated bot for Hive rather than reusing another one. */
+  TELEGRAM_BOT_TOKEN?: string;
+  /** The chat id (usually your own, from @userinfobot or the getUpdates
+   *  API after messaging your new bot once) Telegram messages are sent to. */
+  TELEGRAM_CHAT_ID?: string;
 }
+// APP_URL is declared as a `vars` entry in wrangler.jsonc (not a secret —
+// it's not sensitive), so `wrangler types` generates its declaration into
+// worker-configuration.d.ts directly; it isn't redeclared here.

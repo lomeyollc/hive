@@ -62,9 +62,17 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         assignee: z.string().optional(),
         labels: z.array(z.string()).optional(),
         due_date: z.string().optional().describe("ISO 8601 date"),
+        needs_human: z
+          .boolean()
+          .optional()
+          .describe(
+            "Set true when you're stuck and need a human decision. Pings Telegram immediately " +
+              "and rolls into the daily digest until a human clears it back to false.",
+          ),
+        needs_human_reason: z.string().optional().describe("Why you're stuck — shown in the ping."),
       },
     },
-    async ({ board, title, description, priority, assignee, labels, due_date }) => {
+    async ({ board, title, description, priority, assignee, labels, due_date, needs_human, needs_human_reason }) => {
       try {
         const task = await boardStub(env, board).createTask({
           title,
@@ -74,6 +82,8 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
           labels,
           dueDate: due_date,
           createdBy: actorFor(token),
+          needsHuman: needs_human,
+          needsHumanReason: needs_human_reason,
         });
         return ok(task);
       } catch (e) {
@@ -118,13 +128,22 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         assignee: z.string().optional(),
         labels: z.array(z.string()).optional(),
         due_date: z.string().optional(),
+        needs_human: z
+          .boolean()
+          .optional()
+          .describe(
+            "Set true when stuck and need a human decision (pings Telegram once), or false to clear/resolve it.",
+          ),
+        needs_human_reason: z.string().optional().describe("Why you're stuck — shown in the ping."),
       },
     },
-    async ({ board, task_id, due_date, ...patch }) => {
+    async ({ board, task_id, due_date, needs_human, needs_human_reason, ...patch }) => {
       try {
         const task = await boardStub(env, board).updateTask(task_id, {
           ...patch,
           dueDate: due_date,
+          needsHuman: needs_human,
+          needsHumanReason: needs_human_reason,
         });
         return ok(task);
       } catch (e) {

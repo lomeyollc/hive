@@ -24,6 +24,8 @@ export interface Task {
   created_by: string | null;
   claimed_by: string | null;
   version: number;
+  needs_human: boolean;
+  needs_human_reason: string | null;
 }
 
 export interface Comment {

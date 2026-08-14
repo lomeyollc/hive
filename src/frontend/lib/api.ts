@@ -204,6 +204,8 @@ export interface CreateTaskInput {
   assignee?: string;
   labels?: string[];
   due_date?: string;
+  needs_human?: boolean;
+  needs_human_reason?: string;
 }
 
 export async function createTask(slug: string, input: CreateTaskInput): Promise<Task> {
@@ -217,7 +219,20 @@ export async function createTask(slug: string, input: CreateTaskInput): Promise<
 export async function updateTask(
   slug: string,
   taskId: string,
-  patch: Partial<Pick<Task, "title" | "description" | "status" | "priority" | "assignee" | "labels" | "due_date">>,
+  patch: Partial<
+    Pick<
+      Task,
+      | "title"
+      | "description"
+      | "status"
+      | "priority"
+      | "assignee"
+      | "labels"
+      | "due_date"
+      | "needs_human"
+      | "needs_human_reason"
+    >
+  >,
 ): Promise<Task> {
   const data = await request<{ task: Task }>(
     `/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}`,
@@ -257,6 +272,23 @@ export async function createComment(slug: string, taskId: string, body: string):
     { method: "POST", body: JSON.stringify({ body }) },
   );
   return data.comment;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-board
+// ---------------------------------------------------------------------------
+
+export interface NeedsHumanItem {
+  id: string;
+  board_id: string;
+  title: string;
+  needs_human_reason: string | null;
+  updated_at: string;
+}
+
+export async function listNeedsHuman(): Promise<NeedsHumanItem[]> {
+  const data = await request<{ count: number; items: NeedsHumanItem[] }>("/api/needs-human");
+  return data.items;
 }
 
 // ---------------------------------------------------------------------------

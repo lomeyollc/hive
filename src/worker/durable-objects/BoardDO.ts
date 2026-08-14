@@ -13,6 +13,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "./types";
+import { needsHumanPingMessage, sendTelegramMessage } from "../notify/telegram";
 
 /**
  * BoardDO — one Durable Object instance per board (DO id = board slug, e.g.
@@ -150,6 +151,15 @@ export class BoardDO extends DurableObject<Env> {
       `);
       sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (1, ?)", new Date().toISOString());
     }
+
+    if (version < 2) {
+      sql.exec(`
+        ALTER TABLE tasks ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN needs_human_reason TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tasks_needs_human ON tasks(needs_human);
+      `);
+      sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (2, ?)", new Date().toISOString());
+    }
   }
 
   /** The board slug this DO instance owns. Requires the DO to have been created via `getByName(slug)`. */
@@ -190,12 +200,14 @@ export class BoardDO extends DurableObject<Env> {
       created_by: input.createdBy ?? null,
       claimed_by: null,
       version: 0,
+      needs_human: input.needsHuman ? 1 : 0,
+      needs_human_reason: input.needsHuman ? (input.needsHumanReason ?? null) : null,
     };
 
     this.ctx.storage.sql.exec(
       `INSERT INTO tasks
-        (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, created_by, claimed_by, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, created_by, claimed_by, version, needs_human, needs_human_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.board_id,
       row.title,
@@ -210,10 +222,13 @@ export class BoardDO extends DurableObject<Env> {
       row.created_by,
       row.claimed_by,
       row.version,
+      row.needs_human,
+      row.needs_human_reason,
     );
 
     const task = toTask(row);
     this.#afterWrite({ type: "task.created", boardId: this.boardId, task, at: now }, task);
+    if (task.needsHuman) this.#notifyNeedsHuman(task);
     return task;
   }
 
@@ -279,12 +294,16 @@ export class BoardDO extends DurableObject<Env> {
       claimed_by: patch.claimedBy !== undefined ? patch.claimedBy : existing.claimed_by,
       updated_at: now,
       version: existing.version + 1,
+      needs_human: patch.needsHuman !== undefined ? (patch.needsHuman ? 1 : 0) : existing.needs_human,
+      needs_human_reason:
+        patch.needsHumanReason !== undefined ? patch.needsHumanReason : existing.needs_human_reason,
     };
 
     this.ctx.storage.sql.exec(
       `UPDATE tasks SET
         title = ?, description = ?, status = ?, priority = ?, assignee = ?,
-        labels = ?, due_date = ?, claimed_by = ?, updated_at = ?, version = ?
+        labels = ?, due_date = ?, claimed_by = ?, updated_at = ?, version = ?,
+        needs_human = ?, needs_human_reason = ?
        WHERE id = ?`,
       next.title,
       next.description,
@@ -296,11 +315,16 @@ export class BoardDO extends DurableObject<Env> {
       next.claimed_by,
       next.updated_at,
       next.version,
+      next.needs_human,
+      next.needs_human_reason,
       id,
     );
 
     const task = toTask(next);
     this.#afterWrite({ type: "task.updated", boardId: this.boardId, task, at: now }, task);
+    // Only ping on the false → true transition, not on every subsequent
+    // edit — otherwise re-saving an already-flagged task would re-page.
+    if (task.needsHuman && existing.needs_human === 0) this.#notifyNeedsHuman(task);
     return task;
   }
 
@@ -565,12 +589,13 @@ export class BoardDO extends DurableObject<Env> {
    */
   #syncTaskToIndex(task: Task): void {
     const query = this.env.DB.prepare(
-      `INSERT INTO tasks_index (id, board_id, title, status, priority, assignee, labels, due_date, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO tasks_index (id, board_id, title, status, priority, assignee, labels, due_date, updated_at, needs_human, needs_human_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          board_id = excluded.board_id, title = excluded.title, status = excluded.status,
          priority = excluded.priority, assignee = excluded.assignee, labels = excluded.labels,
-         due_date = excluded.due_date, updated_at = excluded.updated_at`,
+         due_date = excluded.due_date, updated_at = excluded.updated_at,
+         needs_human = excluded.needs_human, needs_human_reason = excluded.needs_human_reason`,
     ).bind(
       task.id,
       task.boardId,
@@ -581,11 +606,36 @@ export class BoardDO extends DurableObject<Env> {
       JSON.stringify(task.labels),
       task.dueDate,
       task.updatedAt,
+      task.needsHuman ? 1 : 0,
+      task.needsHumanReason,
     );
     this.ctx.waitUntil(
       query.run().catch((error) => {
         console.error(`BoardDO: D1 tasks_index sync failed for task ${task.id}:`, error);
       }),
+    );
+  }
+
+  /**
+   * Fires the escalation ping — a Telegram message the moment a task
+   * transitions into needs_human=true. This is the "agent gets stuck, pings
+   * me" half of the loop; the daily digest (scheduled() in
+   * src/worker/index.ts) is the "what's still stuck" half, for anything
+   * that doesn't get cleared same-day.
+   */
+  #notifyNeedsHuman(task: Task): void {
+    const appUrl = this.env.APP_URL ?? "";
+    this.ctx.waitUntil(
+      sendTelegramMessage(
+        this.env,
+        needsHumanPingMessage({
+          boardId: task.boardId,
+          taskId: task.id,
+          title: task.title,
+          reason: task.needsHumanReason,
+          appUrl,
+        }),
+      ),
     );
   }
 
@@ -618,6 +668,8 @@ interface TaskRow extends Record<string, SqlStorageValue> {
   created_by: string | null;
   claimed_by: string | null;
   version: number;
+  needs_human: number;
+  needs_human_reason: string | null;
 }
 
 interface CommentRow extends Record<string, SqlStorageValue> {
@@ -646,6 +698,8 @@ function toTask(row: TaskRow): Task {
     createdBy: row.created_by,
     claimedBy: row.claimed_by,
     version: row.version,
+    needsHuman: row.needs_human === 1,
+    needsHumanReason: row.needs_human_reason,
   };
 }
 

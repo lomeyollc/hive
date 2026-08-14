@@ -38,11 +38,22 @@
     }
   ],
 
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+
+  // Daily "what's still stuck" Telegram digest — see scheduled() in
+  // src/worker/index.ts. 15:00 UTC ≈ 9 PM Bangladesh time; change freely,
+  // it's just cron syntax. No-ops harmlessly if Telegram isn't configured.
+  "triggers": { "crons": ["0 15 * * *"] },
+
+  // Not sensitive — the base URL this instance is reachable at, used to
+  // build links in Telegram messages. Safe to keep in vars (not a secret).
+  "vars": { "APP_URL": "https://hive.lomeyo.com" }
 
   // Secrets (never committed, never put in "vars" here — set with `wrangler secret put <NAME>`):
   //   GOOGLE_CLIENT_ID      - Google OAuth 2.0 client ID (Google Cloud Console)
   //   GOOGLE_CLIENT_SECRET  - Google OAuth 2.0 client secret
   //   SESSION_SECRET        - random string used to HMAC-sign the session cookie
+  //   TELEGRAM_BOT_TOKEN    - from @BotFather, optional (no notifications until set)
+  //   TELEGRAM_CHAT_ID      - your chat id, optional
   // See .dev.vars.example for local development.
 }

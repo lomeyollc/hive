@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Pencil } from "lucide-react";
+import { Pencil, AlertTriangle } from "lucide-react";
 
 export function EditTaskDialog({
   boardSlug,
@@ -36,6 +36,8 @@ export function EditTaskDialog({
   const [assignee, setAssignee] = useState(task.assignee ?? "");
   const [labels, setLabels] = useState(task.labels.join(", "));
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
+  const [needsHuman, setNeedsHuman] = useState(task.needs_human);
+  const [needsHumanReason, setNeedsHumanReason] = useState(task.needs_human_reason ?? "");
 
   function openWithFreshValues(next: boolean) {
     if (next) {
@@ -45,6 +47,8 @@ export function EditTaskDialog({
       setAssignee(task.assignee ?? "");
       setLabels(task.labels.join(", "));
       setDueDate(task.due_date ?? "");
+      setNeedsHuman(task.needs_human);
+      setNeedsHumanReason(task.needs_human_reason ?? "");
     }
     setOpen(next);
   }
@@ -67,6 +71,8 @@ export function EditTaskDialog({
           .map((l) => l.trim())
           .filter(Boolean),
         due_date: dueDate,
+        needs_human: needsHuman,
+        needs_human_reason: needsHuman ? needsHumanReason.trim() : "",
       });
       toast.success("Task updated");
       onUpdated(updated);
@@ -145,6 +151,25 @@ export function EditTaskDialog({
                 onChange={(e) => setLabels(e.target.value)}
                 placeholder="bug, backend (comma-separated)"
               />
+            </div>
+
+            <div className="flex flex-col gap-1.5 rounded-md border p-3">
+              <button
+                type="button"
+                onClick={() => setNeedsHuman((v) => !v)}
+                className={`flex items-center gap-1.5 text-sm font-medium ${needsHuman ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                <AlertTriangle className="size-3.5" />
+                Needs a human
+              </button>
+              {needsHuman && (
+                <Input
+                  value={needsHumanReason}
+                  onChange={(e) => setNeedsHumanReason(e.target.value)}
+                  placeholder="Why? (shown in the Telegram ping/digest)"
+                  className="mt-1"
+                />
+              )}
             </div>
           </div>
 

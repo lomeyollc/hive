@@ -23,6 +23,14 @@ export interface Task {
   createdBy: string | null;
   claimedBy: string | null;
   version: number;
+  /**
+   * The escalation primitive. An agent (or human) sets this true when it's
+   * stuck and needs a decision — Hive pings Telegram immediately and rolls
+   * any still-open ones into a daily digest. A human clearing it back to
+   * false is what "unblocks" the work.
+   */
+  needsHuman: boolean;
+  needsHumanReason: string | null;
 }
 
 export interface Comment {
@@ -42,6 +50,8 @@ export interface CreateTaskInput {
   labels?: string[];
   dueDate?: string | null;
   createdBy?: string | null;
+  needsHuman?: boolean;
+  needsHumanReason?: string | null;
 }
 
 /** Partial patch — only the provided fields are changed. Every update bumps `version` and `updatedAt` regardless. */
@@ -54,6 +64,8 @@ export interface UpdateTaskInput {
   labels?: string[];
   dueDate?: string | null;
   claimedBy?: string | null;
+  needsHuman?: boolean;
+  needsHumanReason?: string | null;
 }
 
 export interface ListTasksFilter {

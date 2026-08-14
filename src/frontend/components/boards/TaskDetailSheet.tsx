@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hand, Trash2 } from "lucide-react";
+import { Hand, Trash2, AlertTriangle, Check } from "lucide-react";
 
 function formatDateTime(iso: string) {
   try {
@@ -133,6 +133,17 @@ export function TaskDetailSheet({
     }
   }
 
+  async function handleResolve() {
+    if (!task) return;
+    try {
+      const updated = await updateTask(boardSlug, task.id, { needs_human: false });
+      onTaskUpdated(updated);
+      toast.success("Resolved — unblocked");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resolve");
+    }
+  }
+
   async function handleDelete() {
     if (!task) return;
     if (!window.confirm(`Delete "${task.title}"? This can't be undone.`)) return;
@@ -158,6 +169,24 @@ export function TaskDetailSheet({
         </SheetHeader>
 
         <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-4">
+          {task.needs_human && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                <div>
+                  <p className="text-sm font-medium text-destructive">Needs you</p>
+                  {task.needs_human_reason && (
+                    <p className="text-xs text-muted-foreground">{task.needs_human_reason}</p>
+                  )}
+                </div>
+              </div>
+              <Button size="sm" variant="outline" className="shrink-0 gap-1.5" onClick={handleResolve}>
+                <Check className="size-3.5" />
+                Resolve
+              </Button>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             <PriorityBadge priority={task.priority} />
             {task.labels.map((label) => (

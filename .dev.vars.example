@@ -10,3 +10,9 @@ SESSION_SECRET=
 # Google-verified email is trusted (fine for a private instance whose URL
 # you don't share; set this for a public-facing one).
 ALLOWED_EMAILS=
+
+# Optional. Powers the needs-human escalation ping + daily digest (see
+# README "Escalation: needs_human"). Unset = notifications are silently
+# skipped, everything else still works.
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=

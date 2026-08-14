@@ -3,6 +3,7 @@ import { handleAuthRequest } from "./auth/routes";
 import { requireSession } from "./auth/session";
 import { BoardDO } from "./durable-objects/BoardDO";
 import { handleMcpRequest } from "./mcp";
+import { sendTelegramMessage } from "./notify/telegram";
 
 /**
  * Hive Worker entry point.
@@ -65,6 +66,50 @@ export default {
 
     return env.ASSETS.fetch(request);
   },
+
+  /**
+   * The "what's still stuck" half of the escalation loop (the immediate
+   * ping on flag-set is the other half, in BoardDO's #notifyNeedsHuman).
+   * Runs on the cron in wrangler.jsonc's `triggers.crons`. Reads D1's
+   * tasks_index — a read-only index, so this never touches a BoardDO
+   * directly — for every task still flagged needs_human, grouped by board,
+   * and sends one digest message. No-op (no Telegram call at all) when
+   * nothing is flagged, so a healthy day produces silence, not noise.
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(sendNeedsHumanDigest(env));
+  },
 } satisfies ExportedHandler<Env>;
+
+async function sendNeedsHumanDigest(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare(
+    `SELECT board_id, title, needs_human_reason
+     FROM tasks_index
+     WHERE needs_human = 1
+     ORDER BY board_id, updated_at ASC`,
+  ).all<{ board_id: string; title: string; needs_human_reason: string | null }>();
+
+  const rows = results ?? [];
+  if (rows.length === 0) return;
+
+  const byBoard = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byBoard.get(row.board_id) ?? [];
+    list.push(row);
+    byBoard.set(row.board_id, list);
+  }
+
+  const lines = [`🐝 <b>Hive daily digest</b> — ${rows.length} task${rows.length === 1 ? "" : "s"} still need you:`];
+  for (const [boardId, tasks] of byBoard) {
+    lines.push("");
+    lines.push(`<b>${boardId}</b>`);
+    for (const t of tasks) {
+      lines.push(t.needs_human_reason ? `• ${t.title} — ${t.needs_human_reason}` : `• ${t.title}`);
+    }
+  }
+  if (env.APP_URL) lines.push("", env.APP_URL);
+
+  await sendTelegramMessage(env, lines.join("\n"));
+}
 
 export { BoardDO };

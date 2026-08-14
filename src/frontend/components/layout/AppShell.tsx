@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { NeedsHumanBadge } from "@/components/layout/NeedsHumanBadge";
 
 function initials(email: string) {
   return email.slice(0, 2).toUpperCase();
@@ -40,6 +41,8 @@ export function AppShell() {
             >
               Boards
             </NavLink>
+
+            <NeedsHumanBadge />
 
             {user && (
               <DropdownMenu>

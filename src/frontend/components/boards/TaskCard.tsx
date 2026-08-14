@@ -1,4 +1,4 @@
-import { Hand } from "lucide-react";
+import { Hand, AlertTriangle } from "lucide-react";
 import type { Task } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,17 @@ export function TaskCard({
 }) {
   return (
     <Card
-      className="cursor-pointer gap-2 py-3 transition-colors hover:border-foreground/30"
+      className={`cursor-pointer gap-2 py-3 transition-colors hover:border-foreground/30 ${
+        task.needs_human ? "border-destructive/40 bg-destructive/5" : ""
+      }`}
       onClick={() => onOpen(task)}
     >
       <CardContent className="flex items-start justify-between gap-3 px-4">
         <div className="flex min-w-0 flex-col gap-1.5">
-          <p className="truncate text-sm font-medium">{task.title}</p>
+          <div className="flex items-center gap-1.5">
+            {task.needs_human && <AlertTriangle className="size-3.5 shrink-0 text-destructive" />}
+            <p className="truncate text-sm font-medium">{task.title}</p>
+          </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <StatusBadge status={task.status} />
             <PriorityBadge priority={task.priority} />

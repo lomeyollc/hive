@@ -11,11 +11,38 @@ at once — is serialized for free. No locking code, no lost updates, no
 double-claimed tasks.
 
 **Status: early / under active development.** Full task/board CRUD (create,
-edit, delete, search/filter) is in the UI, atomic claiming, realtime
-WebSocket updates, the MCP server, the REST API, and the React frontend are
-all implemented — see [Architecture](#architecture) below. Not yet built:
-tests, CI, an audit trail of agent actions, and real multi-user auth beyond
-a shared allowlist.
+edit, delete, search/filter), atomic claiming, realtime WebSocket updates,
+the MCP server, the REST API, the React frontend, and the **needs_human
+escalation loop** (Telegram ping + daily digest) are all implemented — see
+[Architecture](#architecture) and [Escalation](#escalation-needs_human)
+below. Not yet built: tests, CI, an audit trail of agent actions, and real
+multi-user auth beyond a shared allowlist.
+
+## Escalation: needs_human
+
+This is the reason Hive exists, not a bolt-on feature: any task — created
+by you or an agent — can be flagged `needs_human`. The moment it flips
+false → true, Hive pings a Telegram chat immediately. Anything still
+flagged at digest time (daily, `triggers.crons` in `wrangler.jsonc`) rolls
+into one summary message instead of paging you again. A human clearing the
+flag back to false (the "Resolve" button in the task detail view, or
+`needs_human: false` via the API/MCP) is what unblocks the work — the same
+ask→park→resolve shape as any human-in-the-loop system, just backed by a
+task instead of a separate ticket store.
+
+Agents set it via the MCP tools (`create_task`/`update_task` both take
+`needs_human` + `needs_human_reason`); humans use the toggle in the create/
+edit dialogs, or the Resolve button once a flagged task is open. The nav bar
+shows a live cross-board count ("N need you") sourced from
+`GET /api/needs-human`.
+
+**Setup (optional — everything else works without it):**
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, `/newbot`, follow the prompts, copy the token it gives you. This has to be a real conversation with BotFather — there's no API to create a bot without it.
+2. Message your new bot anything once, then visit `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `message.chat.id` from the JSON — that's your `TELEGRAM_CHAT_ID`.
+3. `wrangler secret put TELEGRAM_BOT_TOKEN` and `wrangler secret put TELEGRAM_CHAT_ID`.
+
+Until those are set, `needs_human` still works fully in-app (badges, the
+nav count, the Resolve flow) — you just don't get pinged off-device.
 
 ## Architecture
 
@@ -62,6 +89,8 @@ a shared allowlist.
    npx wrangler secret put GOOGLE_CLIENT_SECRET
    npx wrangler secret put SESSION_SECRET   # any long random string
    npx wrangler secret put ALLOWED_EMAILS   # optional: comma-separated allowlist
+   npx wrangler secret put TELEGRAM_BOT_TOKEN  # optional: see "Escalation: needs_human"
+   npx wrangler secret put TELEGRAM_CHAT_ID    # optional
    ```
 7. Deploy:
    ```bash

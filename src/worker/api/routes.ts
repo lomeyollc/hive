@@ -35,6 +35,11 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  * edge here, once, via `taskToWire` / `commentToWire`.
  *
  * Routes:
+ *   GET    /api/needs-human                      -> { count, items: [...] }
+ *          Cross-board — every task currently flagged needs_human, oldest
+ *          first. Powers the nav badge; the same signal that drives the
+ *          Telegram ping/digest (BoardDO.#notifyNeedsHuman, index.ts
+ *          scheduled()), read back for in-app visibility.
  *   GET    /api/boards                          -> { boards: Board[] }
  *   POST   /api/boards            { id, name, description? }
  *                                                -> { board: Board } (201)
@@ -73,6 +78,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
   const parts = url.pathname.split("/").filter(Boolean); // "/api/boards/:slug/tasks" -> ["api","boards",":slug","tasks"]
 
   try {
+    // /api/needs-human — cross-board, powers the nav badge ("what's stuck on me")
+    if (parts.length === 2 && parts[1] === "needs-human" && request.method === "GET") {
+      return await listNeedsHuman(env);
+    }
+
     // /api/boards
     if (parts.length === 2 && parts[1] === "boards") {
       if (request.method === "GET") return await listBoards(env);
@@ -124,6 +134,22 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     console.error("API error:", error);
     return json({ error: "Internal error" }, 500);
   }
+}
+
+async function listNeedsHuman(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, board_id, title, needs_human_reason, updated_at
+     FROM tasks_index WHERE needs_human = 1 ORDER BY updated_at ASC`,
+  ).all<{ id: string; board_id: string; title: string; needs_human_reason: string | null; updated_at: string }>();
+
+  const items = (results ?? []).map((r) => ({
+    id: r.id,
+    board_id: r.board_id,
+    title: r.title,
+    needs_human_reason: r.needs_human_reason,
+    updated_at: r.updated_at,
+  }));
+  return json({ count: items.length, items });
 }
 
 // ── Boards (D1) ────────────────────────────────────────────────────────
@@ -285,6 +311,8 @@ async function createTask(request: Request, env: Env, slug: string): Promise<Res
     assignee: body.assignee ?? null,
     labels: body.labels,
     dueDate: body.due_date ?? null,
+    needsHuman: body.needs_human,
+    needsHumanReason: body.needs_human_reason ?? null,
   };
   const task = await env.BOARD_DO.getByName(slug).createTask(input);
   return json({ task: taskToWire(task) }, 201);
@@ -300,6 +328,8 @@ async function updateTask(request: Request, env: Env, slug: string, taskId: stri
     assignee: body.assignee,
     labels: body.labels,
     dueDate: body.due_date,
+    needsHuman: body.needs_human,
+    needsHumanReason: body.needs_human_reason,
   };
   const task = await env.BOARD_DO.getByName(slug).updateTask(taskId, patch);
   return json({ task: taskToWire(task) });
@@ -335,6 +365,8 @@ function taskToWire(task: DoTask) {
     created_by: task.createdBy,
     claimed_by: task.claimedBy,
     version: task.version,
+    needs_human: task.needsHuman,
+    needs_human_reason: task.needsHumanReason,
   };
 }
 
@@ -345,6 +377,8 @@ interface WireCreateTaskInput {
   assignee?: string;
   labels?: string[];
   due_date?: string;
+  needs_human?: boolean;
+  needs_human_reason?: string;
 }
 
 interface WireUpdateTaskInput {
@@ -355,6 +389,8 @@ interface WireUpdateTaskInput {
   assignee?: string;
   labels?: string[];
   due_date?: string;
+  needs_human?: boolean;
+  needs_human_reason?: string;
 }
 
 // ── Comments (BoardDO RPC) ────────────────────────────────────────────────
