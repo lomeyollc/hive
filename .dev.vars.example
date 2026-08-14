@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local development (`wrangler dev` reads this file).
+# In production, set these with `wrangler secret put <NAME>` — never commit
+# real values, and never put them in wrangler.jsonc.
+
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+SESSION_SECRET=

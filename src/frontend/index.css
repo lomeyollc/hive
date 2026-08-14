@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/*
+ * shadcn/ui theme tokens go here once components are added, e.g. via:
+ *   npx shadcn@latest init
+ *   npx shadcn@latest add button card dialog
+ * shadcn's CLI will append the :root / .dark CSS variable blocks below this
+ * comment and register itself against components.json in the repo root.
+ */

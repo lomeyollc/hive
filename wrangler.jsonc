@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hive",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-14",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Static frontend (Vite build output). The Cloudflare Vite plugin builds
+  // src/frontend into dist/client automatically when you run `npm run build`.
+  // not_found_handling = SPA: any route that isn't a static file or one of the
+  // run_worker_first patterns below falls through to index.html for React Router.
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/mcp/*", "/auth/*", "/ws/*"]
+  },
+
+  // One BoardDO instance per board (DO id = board slug). SQLite storage backend
+  // is required here (new_sqlite_classes) — it's what keeps this on the free
+  // plan and gives each DO its own durable sql.exec() storage.
+  "durable_objects": {
+    "bindings": [{ "name": "BOARD_DO", "class_name": "BoardDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BoardDO"] }],
+
+  // D1 is a denormalized READ-ONLY index for cross-board search/dashboard only.
+  // Each BoardDO's own SQLite storage is the source of truth for its tasks.
+  // database_id below is a placeholder — replace it after running:
+  //   wrangler d1 create hive
+  // (see README.md "Self-host quickstart" for the full sequence).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hive",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+
+  "observability": { "enabled": true }
+
+  // Secrets (never committed, never put in "vars" here — set with `wrangler secret put <NAME>`):
+  //   GOOGLE_CLIENT_ID      - Google OAuth 2.0 client ID (Google Cloud Console)
+  //   GOOGLE_CLIENT_SECRET  - Google OAuth 2.0 client secret
+  //   SESSION_SECRET        - random string used to HMAC-sign the session cookie
+  // See .dev.vars.example for local development.
+}
