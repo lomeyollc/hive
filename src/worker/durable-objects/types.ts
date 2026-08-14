@@ -5,15 +5,46 @@
  */
 
 /**
- * "planned" is the Backlog concept: a task that's been triaged (title,
- * priority, maybe owner/labels/due date set) but not yet pulled into
- * active work. It's a status value, not a board — Hive doesn't have
- * draggable board columns, so the status tabs already serve as the
- * board/view distinction other tools express separately.
+ * A task's status is a per-board column id — boards define their own
+ * ordered columns (see Column below) instead of sharing one fixed enum.
+ * Every board is seeded with 5 default columns whose ids match the old
+ * fixed statuses ("planned","open","in_progress","blocked","done"), so
+ * existing data needs no migration — only the CHECK constraint that used
+ * to pin these 5 values is gone. A column id is only ever valid within
+ * its own board; there's no cross-board meaning to the string itself.
  */
-export type TaskStatus = "planned" | "open" | "in_progress" | "blocked" | "done";
+export type TaskStatus = string;
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 export type RecurrenceInterval = "daily" | "weekly" | "monthly";
+
+/**
+ * Three roles carry automation; every other column is purely a label with
+ * no side effects:
+ *   "open"   - the pool claimNextTask() draws from (old fixed "open")
+ *   "active" - where claimNextTask() moves a claimed task (old "in_progress")
+ *   "done"   - completing a recurring task into this role spawns its next
+ *              occurrence (old "done")
+ * A board must always have exactly one column with role "open" and one
+ * with role "active" for claimNextTask() to work — enforced by BoardDO
+ * refusing to delete a role-bearing column (rename freely, delete never).
+ * A brand-new custom column always has role null.
+ */
+export type ColumnRole = "open" | "active" | "done";
+
+export interface Column {
+  id: string;
+  name: string;
+  position: number;
+  role: ColumnRole | null;
+}
+
+export interface CreateColumnInput {
+  name: string;
+}
+
+export interface UpdateColumnInput {
+  name?: string;
+}
 
 /** A task as returned to callers — `labels` is a real string array, never the raw JSON TEXT column. */
 export interface Task {
@@ -119,7 +150,11 @@ export type BoardEvent =
   | { type: "task.updated"; boardId: string; task: Task; at: string }
   | { type: "task.claimed"; boardId: string; task: Task; at: string }
   | { type: "task.deleted"; boardId: string; taskId: string; at: string }
-  | { type: "comment.created"; boardId: string; comment: Comment; at: string };
+  | { type: "comment.created"; boardId: string; comment: Comment; at: string }
+  | { type: "column.created"; boardId: string; column: Column; at: string }
+  | { type: "column.updated"; boardId: string; column: Column; at: string }
+  | { type: "column.deleted"; boardId: string; columnId: string; at: string }
+  | { type: "columns.reordered"; boardId: string; columns: Column[]; at: string };
 
 /**
  * Thrown by BoardDO methods. Callers going through RPC should branch on

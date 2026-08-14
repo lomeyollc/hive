@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { claimTask, createComment, createTask, deleteTask, listComments, updateTask } from "@/lib/api";
-import type { Comment, Task } from "@/lib/types";
-import { STATUS_OPTIONS, StatusBadge } from "@/components/boards/StatusBadge";
+import type { Column, Comment, Task } from "@/lib/types";
+import { GenericStatusBadge, StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
 import { EditTaskDialog } from "@/components/boards/EditTaskDialog";
 import {
@@ -36,6 +36,7 @@ export function TaskDetailSheet({
   boardSlug,
   task,
   allTasks,
+  columns,
   onOpenTask,
   onOpenChange,
   onTaskUpdated,
@@ -48,6 +49,7 @@ export function TaskDetailSheet({
   /** Every task currently loaded for this board — used only to derive
    *  sub-tasks/parent client-side; no extra fetch needed. */
   allTasks: Task[];
+  columns: Column[];
   onOpenTask: (taskId: string) => void;
   onOpenChange: (open: boolean) => void;
   onTaskUpdated: (task: Task) => void;
@@ -261,15 +263,20 @@ export function TaskDetailSheet({
               >
                 <SelectTrigger className="mt-1 h-8">
                   <SelectValue>
-                    <StatusBadge status={task.status} />
+                    {(() => {
+                      const column = columns.find((c) => c.id === task.status);
+                      return column ? <StatusBadge column={column} /> : <GenericStatusBadge status={task.status} />;
+                    })()}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
+                  {[...columns]
+                    .sort((a, b) => a.position - b.position)
+                    .map((column) => (
+                      <SelectItem key={column.id} value={column.id}>
+                        {column.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -342,7 +349,14 @@ export function TaskDetailSheet({
                 className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm hover:bg-muted/50"
               >
                 <span className="flex items-center gap-1.5 truncate">
-                  <StatusBadge status={sub.status} className="shrink-0" />
+                  {(() => {
+                    const column = columns.find((c) => c.id === sub.status);
+                    return column ? (
+                      <StatusBadge column={column} className="shrink-0" />
+                    ) : (
+                      <GenericStatusBadge status={sub.status} className="shrink-0" />
+                    );
+                  })()}
                   <span className="truncate">{sub.title}</span>
                 </span>
                 <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { deleteBoard, getBoard, updateBoard } from "@/lib/api";
+import type { Column } from "@/lib/types";
+import { ManageColumnsDialog } from "@/components/boards/ManageColumnsDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,9 +21,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Columns3 } from "lucide-react";
 
-export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted: () => void }) {
+export function BoardSettingsMenu({
+  slug,
+  columns,
+  onDeleted,
+  onColumnsChanged,
+}: {
+  slug: string;
+  columns: Column[];
+  onDeleted: () => void;
+  onColumnsChanged: (columns: Column[]) => void;
+}) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [loadingCurrent, setLoadingCurrent] = useState(false);
   const [name, setName] = useState("");
@@ -30,6 +42,7 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
 
   async function openRename() {
     setLoadingCurrent(true);
@@ -90,6 +103,10 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
           <DropdownMenuItem onSelect={openRename}>
             <Pencil className="size-3.5" />
             Rename board
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setColumnsOpen(true)}>
+            <Columns3 className="size-3.5" />
+            Manage columns
           </DropdownMenuItem>
           <DropdownMenuItem
             variant="destructive"
@@ -175,6 +192,14 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ManageColumnsDialog
+        slug={slug}
+        columns={columns}
+        open={columnsOpen}
+        onOpenChange={setColumnsOpen}
+        onColumnsChanged={onColumnsChanged}
+      />
     </>
   );
 }

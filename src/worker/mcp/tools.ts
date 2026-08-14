@@ -23,7 +23,12 @@ export interface McpEnv {
 }
 
 const priorityEnum = z.enum(["low", "normal", "high", "urgent"]);
-const statusEnum = z.enum(["planned", "open", "in_progress", "blocked", "done"]);
+// A status is a per-board column id — boards define their own columns now,
+// so this can't be a fixed enum. Call list_columns first to see valid
+// values for a given board; every board starts with "planned", "open",
+// "in_progress", "blocked", "done" but any of those may have been renamed,
+// deleted (if custom), or joined by new custom columns since.
+const statusSchema = z.string().describe('A column id on this board — call list_columns to see valid values. Defaults to the board\'s "open"-role column.');
 const recurrenceEnum = z.enum(["daily", "weekly", "monthly"]);
 
 function ok(payload: unknown): CallToolResult {
@@ -81,7 +86,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         board: z.string().describe("Board slug, e.g. \"engineering\""),
         title: z.string().min(1).describe("Task title"),
         description: z.string().optional(),
-        status: statusEnum.optional().describe("Defaults to \"open\". Use \"planned\" to file straight into the Backlog."),
+        status: statusSchema.optional(),
         priority: priorityEnum.optional().describe("Defaults to \"normal\""),
         assignee: z.string().optional(),
         labels: z.array(z.string()).optional(),
@@ -169,7 +174,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         task_id: z.string(),
         title: z.string().optional(),
         description: z.string().optional(),
-        status: statusEnum.optional(),
+        status: statusSchema.optional(),
         priority: priorityEnum.optional(),
         assignee: z.string().optional(),
         labels: z.array(z.string()).optional(),
@@ -292,7 +297,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         "those fields; widen this tool's schema if that changes.)",
       inputSchema: {
         board: z.string(),
-        status: statusEnum.optional(),
+        status: statusSchema.optional(),
         assignee: z.string().optional(),
         label: z.string().optional(),
         parent_task_id: z.string().optional().describe("List only sub-tasks of this task id."),
@@ -423,6 +428,103 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         return ok({ tasks: taskRows.results ?? [], comments: commentRows.results ?? [] });
       } catch (e) {
         return err(`search failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "list_columns",
+    {
+      title: "List Columns",
+      description:
+        "List a board's columns in order. Every task's `status` is one of these columns' ids — call this before " +
+        "create_task/update_task if you don't already know the board's valid status values.",
+      inputSchema: { board: z.string() },
+    },
+    async ({ board }) => {
+      try {
+        await requireBoardAccess(env, token, board);
+        return ok(await boardStub(env, board).listColumns());
+      } catch (e) {
+        return err(`list_columns failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "create_column",
+    {
+      title: "Create Column",
+      description: "Add a new column to a board. Always appended at the end — use reorder_columns to reposition it.",
+      inputSchema: { board: z.string(), name: z.string().min(1) },
+    },
+    async ({ board, name }) => {
+      try {
+        await requireBoardAccess(env, token, board);
+        return ok(await boardStub(env, board).createColumn({ name }));
+      } catch (e) {
+        return err(`create_column failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "update_column",
+    {
+      title: "Update Column",
+      description: "Rename a column.",
+      inputSchema: { board: z.string(), column_id: z.string(), name: z.string().min(1) },
+    },
+    async ({ board, column_id, name }) => {
+      try {
+        await requireBoardAccess(env, token, board);
+        return ok(await boardStub(env, board).updateColumn(column_id, { name }));
+      } catch (e) {
+        return err(`update_column failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "delete_column",
+    {
+      title: "Delete Column",
+      description:
+        "Delete a custom column. Fails if the column has an automation role (open/active/done — rename those " +
+        "instead) or has tasks in it and no reassign_to is given.",
+      inputSchema: {
+        board: z.string(),
+        column_id: z.string(),
+        reassign_to: z.string().optional().describe("Another column id to move this column's tasks into first."),
+      },
+    },
+    async ({ board, column_id, reassign_to }) => {
+      try {
+        await requireBoardAccess(env, token, board);
+        await boardStub(env, board).deleteColumn(column_id, reassign_to);
+        return ok({ deleted: column_id });
+      } catch (e) {
+        return err(`delete_column failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "reorder_columns",
+    {
+      title: "Reorder Columns",
+      description: "Set the display order of every column on a board in one call.",
+      inputSchema: {
+        board: z.string(),
+        ordered_ids: z.array(z.string()).min(1).describe("Every column id on this board, in the desired order."),
+      },
+    },
+    async ({ board, ordered_ids }) => {
+      try {
+        await requireBoardAccess(env, token, board);
+        return ok(await boardStub(env, board).reorderColumns(ordered_ids));
+      } catch (e) {
+        return err(`reorder_columns failed: ${(e as Error).message}`);
       }
     }
   );

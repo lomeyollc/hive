@@ -7,13 +7,10 @@ import { useWorkspace } from "@/context/workspace-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/components/boards/StatusBadge";
+import { GenericStatusBadge } from "@/components/boards/StatusBadge";
 import { CreateBoardDialog } from "@/components/boards/CreateBoardDialog";
 import { CreateWorkspaceDialog } from "@/components/workspace/CreateWorkspaceDialog";
 import { Users } from "lucide-react";
-import type { TaskStatus } from "@/lib/types";
-
-const COUNT_STATUSES: TaskStatus[] = ["open", "in_progress", "blocked", "done"];
 
 export function BoardListPage() {
   const { workspaces, current: workspace, refresh: refreshWorkspaces } = useWorkspace();
@@ -100,12 +97,11 @@ export function BoardListPage() {
                   {board.description && <CardDescription>{board.description}</CardDescription>}
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-1.5">
-                  {COUNT_STATUSES.map((status) => {
-                    const count = board.task_counts?.[status] ?? 0;
+                  {Object.entries(board.task_counts ?? {}).map(([status, count]) => {
                     if (count === 0) return null;
                     return (
                       <div key={status} className="flex items-center gap-1">
-                        <StatusBadge status={status} />
+                        <GenericStatusBadge status={status} />
                         <span className="text-xs text-muted-foreground">{count}</span>
                       </div>
                     );

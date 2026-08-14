@@ -6,9 +6,23 @@
  * backend agent's response shapes differ.
  */
 
-export type TaskStatus = "planned" | "open" | "in_progress" | "blocked" | "done";
+/** A per-board column id — see Column below. Not a fixed enum: every board
+ *  defines its own ordered columns, seeded with 5 defaults whose ids match
+ *  the old fixed statuses ("planned","open","in_progress","blocked","done"). */
+export type TaskStatus = string;
 export type RecurrenceInterval = "daily" | "weekly" | "monthly";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
+
+/** Three roles carry automation (claim_next_task, recurrence); every other
+ *  column is a plain label with no side effects. See BoardDO's doc comment. */
+export type ColumnRole = "open" | "active" | "done";
+
+export interface Column {
+  id: string;
+  name: string;
+  position: number;
+  role: ColumnRole | null;
+}
 
 export interface Task {
   id: string;
@@ -39,13 +53,8 @@ export interface Comment {
   created_at: string;
 }
 
-export interface TaskCounts {
-  planned: number;
-  open: number;
-  in_progress: number;
-  blocked: number;
-  done: number;
-}
+/** Keyed by column id — which ids exist depends on the board (see Column). */
+export type TaskCounts = Record<string, number>;
 
 export interface Board {
   id: string;
@@ -57,6 +66,9 @@ export interface Board {
   /** Denormalized from D1's tasks_index — may be absent while the index
    *  catches up; api.ts / BoardListPage treat a missing value as zeros. */
   task_counts?: TaskCounts;
+  /** Only present on GET /api/boards/:slug (the list endpoint omits it to
+   *  avoid a DO round-trip per board). */
+  columns?: Column[];
 }
 
 export interface Workspace {
@@ -106,4 +118,8 @@ export type BoardSocketMessage =
   | { type: "task.updated"; task: Task }
   | { type: "task.claimed"; task: Task }
   | { type: "task.deleted"; taskId: string }
-  | { type: "comment.created"; comment: Comment };
+  | { type: "comment.created"; comment: Comment }
+  | { type: "column.created"; column: Column }
+  | { type: "column.updated"; column: Column }
+  | { type: "column.deleted"; columnId: string }
+  | { type: "columns.reordered"; columns: Column[] };

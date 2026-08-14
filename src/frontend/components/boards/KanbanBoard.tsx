@@ -7,18 +7,10 @@ import {
   closestCorners,
 } from "@dnd-kit/core";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
-import type { Task, TaskStatus } from "@/lib/types";
+import type { Column, Task, TaskStatus } from "@/lib/types";
 import { StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
 import { AlertTriangle } from "lucide-react";
-
-const COLUMNS: { status: TaskStatus; label: string }[] = [
-  { status: "planned", label: "Backlog" },
-  { status: "open", label: "Open" },
-  { status: "in_progress", label: "In progress" },
-  { status: "blocked", label: "Blocked" },
-  { status: "done", label: "Done" },
-];
 
 function KanbanCard({ task, onOpen }: { task: Task; onOpen: (task: Task) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id });
@@ -49,18 +41,8 @@ function KanbanCard({ task, onOpen }: { task: Task; onOpen: (task: Task) => void
   );
 }
 
-function KanbanColumn({
-  status,
-  label,
-  tasks,
-  onOpen,
-}: {
-  status: TaskStatus;
-  label: string;
-  tasks: Task[];
-  onOpen: (task: Task) => void;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+function KanbanColumn({ column, tasks, onOpen }: { column: Column; tasks: Task[]; onOpen: (task: Task) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: column.id });
 
   return (
     <div
@@ -70,7 +52,7 @@ function KanbanColumn({
       }`}
     >
       <div className="flex items-center justify-between px-1 pt-1">
-        <StatusBadge status={status} />
+        <StatusBadge column={column} />
         <span className="text-xs text-muted-foreground">{tasks.length}</span>
       </div>
       <div className="flex min-h-16 flex-col gap-2">
@@ -83,7 +65,6 @@ function KanbanColumn({
           </div>
         )}
       </div>
-      <p className="sr-only">{label}</p>
     </div>
   );
 }
@@ -93,20 +74,24 @@ function KanbanColumn({
  * same board detail page. Dragging a card between columns updates the
  * task's status via `onMove`, optimistically (the caller re-renders
  * immediately; the API call happens in the background, same pattern as
- * claim/resolve elsewhere in the app).
+ * claim/resolve elsewhere in the app). Columns are this board's own —
+ * see BoardDetailPage, which fetches them via getBoard().
  */
 export function KanbanBoard({
   tasks,
+  columns,
   onOpen,
   onMove,
 }: {
   tasks: Task[];
+  columns: Column[];
   onOpen: (task: Task) => void;
   onMove: (task: Task, status: TaskStatus) => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const byStatus = (status: TaskStatus) => tasks.filter((t) => t.status === status);
+  const orderedColumns = [...columns].sort((a, b) => a.position - b.position);
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -120,8 +105,8 @@ export function KanbanBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {COLUMNS.map((col) => (
-          <KanbanColumn key={col.status} status={col.status} label={col.label} tasks={byStatus(col.status)} onOpen={onOpen} />
+        {orderedColumns.map((column) => (
+          <KanbanColumn key={column.id} column={column} tasks={byStatus(column.id)} onOpen={onOpen} />
         ))}
       </div>
     </DndContext>

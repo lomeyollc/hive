@@ -34,10 +34,14 @@
 export type {
   Task,
   Comment,
+  Column,
+  ColumnRole,
   TaskStatus,
   TaskPriority,
   CreateTaskInput,
   UpdateTaskInput,
+  CreateColumnInput,
+  UpdateColumnInput,
   ListTasksFilter,
   ClaimNextTaskFilter,
   CreateCommentInput,
@@ -46,8 +50,11 @@ export type {
 import type {
   Task,
   Comment,
+  Column,
   CreateTaskInput,
   UpdateTaskInput,
+  CreateColumnInput,
+  UpdateColumnInput,
   ListTasksFilter,
   ClaimNextTaskFilter,
   CreateCommentInput,
@@ -66,6 +73,11 @@ export interface BoardDOStub {
   claimNextTask(filter: ClaimNextTaskFilter | undefined, claimedBy: string): Promise<Task | null>;
   commentTask(taskId: string, input: CreateCommentInput): Promise<Comment>;
   listTasks(filter?: ListTasksFilter): Promise<Task[]>;
+  listColumns(): Promise<Column[]>;
+  createColumn(input: CreateColumnInput): Promise<Column>;
+  updateColumn(id: string, patch: UpdateColumnInput): Promise<Column>;
+  deleteColumn(id: string, reassignTo?: string): Promise<void>;
+  reorderColumns(orderedIds: string[]): Promise<Column[]>;
 }
 
 /** Row shape of D1's `boards` table (migrations/0001_init.sql). Read-only here. */

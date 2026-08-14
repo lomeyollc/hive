@@ -95,6 +95,18 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *   GET    /api/boards/:slug/tasks/:id/comments  -> { comments: Comment[] }
  *   POST   /api/boards/:slug/tasks/:id/comments  { body: string }
  *                                                -> { comment: Comment } (201)
+ *   GET    /api/boards/:slug/columns             -> { columns: Column[] }
+ *          Also embedded in GET /api/boards/:slug's response.
+ *   POST   /api/boards/:slug/columns  { name }   -> { column: Column } (201)
+ *          Always appended at the end; use reorder to reposition.
+ *   PATCH  /api/boards/:slug/columns/:id  { name }
+ *                                                -> { column: Column }
+ *   DELETE /api/boards/:slug/columns/:id  { reassign_to? }
+ *                                                -> { ok: true }
+ *          Role-bearing columns (open/active/done) can't be deleted, only
+ *          renamed. A custom column with tasks needs reassign_to.
+ *   POST   /api/boards/:slug/columns/reorder  { ordered_ids: string[] }
+ *                                                -> { columns: Column[] }
  *
  */
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
@@ -200,6 +212,25 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       const [, , slug, , taskId] = parts;
       if (request.method === "GET") return await listComments(env, slug, taskId);
       if (request.method === "POST") return await createComment(request, env, slug, taskId, session.email);
+    }
+
+    // /api/boards/:slug/columns
+    if (parts.length === 4 && parts[1] === "boards" && parts[3] === "columns") {
+      const slug = parts[2];
+      if (request.method === "GET") return await listColumns(env, slug);
+      if (request.method === "POST") return await createColumn(request, env, slug);
+    }
+
+    // /api/boards/:slug/columns/reorder
+    if (parts.length === 5 && parts[1] === "boards" && parts[3] === "columns" && parts[4] === "reorder") {
+      if (request.method === "POST") return await reorderColumns(request, env, parts[2]);
+    }
+
+    // /api/boards/:slug/columns/:id
+    if (parts.length === 5 && parts[1] === "boards" && parts[3] === "columns") {
+      const [, , slug, , columnId] = parts;
+      if (request.method === "PATCH") return await updateColumn(request, env, slug, columnId);
+      if (request.method === "DELETE") return await deleteColumn(request, env, slug, columnId);
     }
 
     return json({ error: "Not found" }, 404);
@@ -586,16 +617,18 @@ async function getBoard(env: Env, slug: string, email: string): Promise<Response
     throw new NotFoundError(`board "${slug}" not found`);
   }
 
-  const { results: countRows } = await env.DB.prepare(
-    `SELECT status, COUNT(*) AS count FROM tasks_index WHERE board_id = ? GROUP BY status`,
-  )
-    .bind(slug)
-    .all<{ status: TaskStatus; count: number }>();
+  const [{ results: countRows }, columns] = await Promise.all([
+    env.DB.prepare(`SELECT status, COUNT(*) AS count FROM tasks_index WHERE board_id = ? GROUP BY status`)
+      .bind(slug)
+      .all<{ status: TaskStatus; count: number }>(),
+    env.BOARD_DO.getByName(slug).listColumns(),
+  ]);
 
-  const counts: Record<TaskStatus, number> = { planned: 0, open: 0, in_progress: 0, blocked: 0, done: 0 };
+  const counts: Record<string, number> = {};
+  for (const column of columns) counts[column.id] = 0;
   for (const row2 of countRows ?? []) counts[row2.status] = row2.count;
 
-  return json({ board: boardToWire(row, counts) });
+  return json({ board: { ...boardToWire(row, counts), columns } });
 }
 
 async function createBoard(request: Request, env: Env, email: string): Promise<Response> {
@@ -851,6 +884,43 @@ function commentToWire(comment: DoComment) {
     body: comment.body,
     created_at: comment.createdAt,
   };
+}
+
+// ── Columns (BoardDO RPC) ─────────────────────────────────────────────────
+
+async function listColumns(env: Env, slug: string): Promise<Response> {
+  const columns = await env.BOARD_DO.getByName(slug).listColumns();
+  return json({ columns });
+}
+
+async function createColumn(request: Request, env: Env, slug: string): Promise<Response> {
+  const body = await readJson<{ name?: string }>(request);
+  if (!body.name?.trim()) {
+    throw new ValidationError("name is required");
+  }
+  const column = await env.BOARD_DO.getByName(slug).createColumn({ name: body.name });
+  return json({ column }, 201);
+}
+
+async function updateColumn(request: Request, env: Env, slug: string, columnId: string): Promise<Response> {
+  const body = await readJson<{ name?: string }>(request);
+  const column = await env.BOARD_DO.getByName(slug).updateColumn(columnId, { name: body.name });
+  return json({ column });
+}
+
+async function deleteColumn(request: Request, env: Env, slug: string, columnId: string): Promise<Response> {
+  const body = await readJson<{ reassign_to?: string }>(request).catch(() => ({}) as { reassign_to?: string });
+  await env.BOARD_DO.getByName(slug).deleteColumn(columnId, body.reassign_to);
+  return json({ ok: true });
+}
+
+async function reorderColumns(request: Request, env: Env, slug: string): Promise<Response> {
+  const body = await readJson<{ ordered_ids?: string[] }>(request);
+  if (!Array.isArray(body.ordered_ids) || body.ordered_ids.length === 0) {
+    throw new ValidationError("ordered_ids is required");
+  }
+  const columns = await env.BOARD_DO.getByName(slug).reorderColumns(body.ordered_ids);
+  return json({ columns });
 }
 
 // ── helpers ────────────────────────────────────────────────────────────

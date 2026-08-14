@@ -6,20 +6,68 @@ Hive is an open-source, AI-agent-native task/project manager. Built so a
 human and a fleet of AI agents can share one live board without colliding.
 
 **Live:** [hive.lomeyo.com](https://hive.lomeyo.com) · **Docs (MCP + REST
-API + self-host):** [hive.lomeyo.com/docs](https://hive.lomeyo.com/docs)
+API + self-host):** [hive.lomeyo.com/docs](https://hive.lomeyo.com/docs) ·
+**LLM-readable summary:** [hive.lomeyo.com/llms.txt](https://hive.lomeyo.com/llms.txt)
 
-Every board is a single Cloudflare Durable Object. A DO is single-threaded
-per instance, so every write — whether it comes from you or from ten agents
-at once — is serialized for free. No locking code, no lost updates, no
-double-claimed tasks.
+## Why this exists
 
-**Status: early / under active development.** Full task/board CRUD (create,
-edit, delete, search/filter), atomic claiming, realtime WebSocket updates,
-the MCP server, the REST API, the React frontend, and the **needs_human
-escalation loop** (Telegram ping + daily digest) are all implemented — see
+Every existing PM tool falls into one of two buckets: consumer tools
+(Linear, Asana, Trello, ClickUp, Notion) that have no real API surface for
+an AI agent to act through — at best a bolted-on webhook, never a native
+protocol — or dev-shaped tools (GitHub Issues/Projects) that force
+non-engineering work (sales, support, content, personal ops) into a
+code-review mental model it doesn't fit. None of them were built assuming
+an agent is a first-class actor on the board, not a human typing through a
+UI.
+
+Hive flips that: **MCP is the agent surface from day one**, not an
+afterthought. A board's tasks live in a single-threaded Durable Object, so
+ten agents claiming work at once never race or double-claim — no locking
+code needed, it's a property of the storage model. Every task/board/comment
+has a stable, copyable URL. When an agent gets stuck, it flags the task
+`needs_human` and you get pinged directly instead of the work silently
+stalling in a queue nobody's watching.
+
+## Why self-hosted, on Cloudflare specifically
+
+No per-seat SaaS pricing, no vendor lock-in, no "contact sales" tier for API
+access — the whole point breaks if adding another agent costs another seat.
+Cloudflare Workers + Durable Objects (SQLite-backed) + D1 run this entire
+app — API, realtime WebSockets, storage, and the MCP server — **inside
+Cloudflare's free tier** for solo/small-team usage:
+
+- **Workers**: 100,000 requests/day free.
+- **Durable Objects (SQLite storage)** and **D1**: both have a free tier
+  (this is *why* the codebase insists on `new_sqlite_classes` for Durable
+  Objects — the older non-SQLite DO storage backend requires a paid plan;
+  SQLite-backed DOs don't).
+
+Cloudflare revises these numbers over time — check
+[cloudflare.com/plans](https://www.cloudflare.com/plans/) for current
+figures before assuming they'll hold forever. For a single person plus a
+handful of agents, in practice you will not come close to the free-tier
+ceiling; a growing team eventually will, and Cloudflare's paid tier at that
+point is still usage-based, not per-seat.
+
+## Status: ready for real use
+
+Task/board CRUD, atomic claiming, sub-tasks, recurring tasks, **custom
+per-board columns** (every board defines its own stages — a sales pipeline
+and an engineering board don't have to share one fixed status list),
+realtime WebSocket updates, workspaces + invites, the cross-board activity
+feed + search, the MCP server, the REST API, and the **needs_human
+escalation loop** are all implemented and live — see
 [Architecture](#architecture) and [Escalation](#escalation-needs_human)
-below. Not yet built: tests, CI, an audit trail of agent actions, and real
-multi-user auth beyond a shared allowlist.
+below.
+
+**Known gaps, stated plainly:**
+- The Telegram `needs_human` ping (BotFather setup below) is implemented
+  but **not yet end-to-end tested against a live bot** — the in-app
+  escalation flow (badges, nav count, Resolve) works regardless and is
+  fully tested; the off-device Telegram ping is the untested part.
+- No automated test suite or CI yet.
+- No audit trail of agent actions beyond the activity feed.
+- Auth is Google Sign-In + an optional email allowlist — no SSO/SAML.
 
 ## Escalation: needs_human
 
@@ -39,7 +87,7 @@ edit dialogs, or the Resolve button once a flagged task is open. The nav bar
 shows a live cross-board count ("N need you") sourced from
 `GET /api/needs-human`.
 
-**Setup (optional — everything else works without it):**
+**Setup (optional — everything else works without it; not yet tested end-to-end on a live bot):**
 1. Message [@BotFather](https://t.me/BotFather) on Telegram, `/newbot`, follow the prompts, copy the token it gives you. This has to be a real conversation with BotFather — there's no API to create a bot without it.
 2. Message your new bot anything once, then visit `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `message.chat.id` from the JSON — that's your `TELEGRAM_CHAT_ID`.
 3. `wrangler secret put TELEGRAM_BOT_TOKEN` and `wrangler secret put TELEGRAM_CHAT_ID`.
@@ -61,8 +109,11 @@ nav count, the Resolve flow) — you just don't get pinged off-device.
   `ALLOWED_EMAILS` allowlist); long-lived Bearer API tokens (SHA-256 hashed
   in D1) for agents and the MCP server.
 - **MCP server** at `/mcp`, Bearer-token authenticated: `create_task`,
-  `get_task`, `update_task`, `claim_next_task`, `comment_task`,
-  `list_tasks`, `list_boards`.
+  `get_task`, `update_task`, `delete_task`, `claim_next_task`,
+  `comment_task`, `list_tasks`, `list_boards`, `list_activity`, `search`,
+  `list_columns`, `create_column`, `update_column`, `delete_column`,
+  `reorder_columns`. Full schemas via `tools/list` — see
+  [hive.lomeyo.com/docs](https://hive.lomeyo.com/docs).
 - **Frontend** — React + shadcn/ui + Tailwind, served as static assets from
   the same Worker.
 

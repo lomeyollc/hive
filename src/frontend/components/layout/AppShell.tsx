@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Settings, LogOut } from "lucide-react";
+import { Settings, LogOut, LayoutGrid, Users, Activity, BookOpen } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { HiveLogo } from "@/components/icons/HiveLogo";
 import { Button } from "@/components/ui/button";
@@ -26,57 +26,63 @@ export function AppShell() {
     <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <Link to="/boards" className="flex items-center gap-2 font-semibold">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link to="/boards" className="flex shrink-0 items-center gap-2 font-semibold">
               <HiveLogo className="size-5" />
-              Hive
+              <span className="hidden sm:inline">Hive</span>
             </Link>
-            <span className="h-5 w-px bg-border" />
-            <WorkspaceSwitcher />
+            <span className="h-5 w-px shrink-0 bg-border" />
+            <div className="min-w-0 truncate">
+              <WorkspaceSwitcher />
+            </div>
           </div>
 
           <nav className="flex items-center gap-1">
-            <NavLink
-              to="/boards"
-              className={({ isActive }) =>
-                `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
-                }`
-              }
-            >
-              Boards
-            </NavLink>
+            {/* Full text nav — hidden below sm, folded into the user menu instead so the
+                header never overflows on a phone-width screen. */}
+            <div className="hidden items-center gap-1 sm:flex">
+              <NavLink
+                to="/boards"
+                className={({ isActive }) =>
+                  `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`
+                }
+              >
+                Boards
+              </NavLink>
 
-            <NavLink
-              to="/workspace"
-              className={({ isActive }) =>
-                `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
-                }`
-              }
-            >
-              Workspace
-            </NavLink>
+              <NavLink
+                to="/workspace"
+                className={({ isActive }) =>
+                  `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`
+                }
+              >
+                Workspace
+              </NavLink>
 
-            <NavLink
-              to="/activity"
-              className={({ isActive }) =>
-                `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
-                }`
-              }
-            >
-              Activity
-            </NavLink>
+              <NavLink
+                to="/activity"
+                className={({ isActive }) =>
+                  `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`
+                }
+              >
+                Activity
+              </NavLink>
 
-            <a
-              href="/docs"
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Docs
-            </a>
+              <a
+                href="/docs"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Docs
+              </a>
+            </div>
 
             <NeedsHumanBadge />
 
@@ -95,6 +101,32 @@ export function AppShell() {
                     <span className="text-sm font-medium">{user.email}</span>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  {/* Same 4 destinations as the desktop nav row — only shown here below sm. */}
+                  <DropdownMenuItem asChild className="sm:hidden">
+                    <Link to="/boards" className="flex items-center gap-2">
+                      <LayoutGrid className="size-4" />
+                      Boards
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="sm:hidden">
+                    <Link to="/workspace" className="flex items-center gap-2">
+                      <Users className="size-4" />
+                      Workspace
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="sm:hidden">
+                    <Link to="/activity" className="flex items-center gap-2">
+                      <Activity className="size-4" />
+                      Activity
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="sm:hidden">
+                    <a href="/docs" target="_blank" rel="noreferrer" className="flex items-center gap-2">
+                      <BookOpen className="size-4" />
+                      Docs
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="sm:hidden" />
                   <DropdownMenuItem asChild>
                     <Link to="/settings" className="flex items-center gap-2">
                       <Settings className="size-4" />

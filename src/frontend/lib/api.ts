@@ -43,6 +43,7 @@
 import type {
   ApiToken,
   Board,
+  Column,
   Comment,
   CreatedApiToken,
   CurrentUser,
@@ -266,6 +267,46 @@ export async function deleteTask(slug: string, taskId: string): Promise<void> {
   await request<void>(`/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}`, {
     method: "DELETE",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Columns
+// ---------------------------------------------------------------------------
+
+export async function listColumns(slug: string): Promise<Column[]> {
+  const data = await request<{ columns: Column[] }>(`/api/boards/${encodeURIComponent(slug)}/columns`);
+  return data.columns;
+}
+
+export async function createColumn(slug: string, name: string): Promise<Column> {
+  const data = await request<{ column: Column }>(`/api/boards/${encodeURIComponent(slug)}/columns`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  return data.column;
+}
+
+export async function updateColumn(slug: string, columnId: string, name: string): Promise<Column> {
+  const data = await request<{ column: Column }>(
+    `/api/boards/${encodeURIComponent(slug)}/columns/${encodeURIComponent(columnId)}`,
+    { method: "PATCH", body: JSON.stringify({ name }) },
+  );
+  return data.column;
+}
+
+export async function deleteColumn(slug: string, columnId: string, reassignTo?: string): Promise<void> {
+  await request<void>(`/api/boards/${encodeURIComponent(slug)}/columns/${encodeURIComponent(columnId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ reassign_to: reassignTo }),
+  });
+}
+
+export async function reorderColumns(slug: string, orderedIds: string[]): Promise<Column[]> {
+  const data = await request<{ columns: Column[] }>(`/api/boards/${encodeURIComponent(slug)}/columns/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  return data.columns;
 }
 
 // ---------------------------------------------------------------------------

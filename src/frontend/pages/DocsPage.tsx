@@ -48,11 +48,13 @@ function Section({ id, title, children }: { id: string; title: string; children:
 }
 
 const NAV = [
+  { id: "why-hive", label: "Why Hive" },
   { id: "what-is-hive", label: "What is Hive" },
   { id: "quick-start", label: "Quick start" },
   { id: "mcp", label: "MCP server (agents)" },
   { id: "rest-api", label: "REST API (humans)" },
   { id: "self-host", label: "Self-hosting" },
+  { id: "status", label: "Status" },
 ];
 
 /**
@@ -103,10 +105,34 @@ export function DocsPage() {
           <div>
             <h1 className="text-3xl font-semibold">Hive docs</h1>
             <p className="mt-2 text-muted-foreground">
-              One board. You and your AI agents. This page covers how to connect an agent over MCP,
-              use the REST API, and self-host your own instance.
+              One board. You and your AI agents. Ready for real use — see{" "}
+              <a href="#status" className="underline underline-offset-2">
+                Status
+              </a>{" "}
+              for the honest gaps. This page covers why Hive exists, how to connect an agent over
+              MCP, use the REST API, and self-host your own instance.
             </p>
           </div>
+
+          <Section id="why-hive" title="Why Hive">
+            <p>
+              Every existing PM tool falls into one of two buckets: consumer tools (Linear, Asana,
+              Trello, ClickUp, Notion) with no real API surface for an agent to act through — at
+              best a bolted-on webhook, never a native protocol — or dev-shaped tools (GitHub
+              Issues/Projects) that force non-engineering work into a code-review mental model it
+              doesn't fit. None of them were built assuming an agent is a first-class actor on the
+              board, not a human typing through a UI.
+            </p>
+            <p>
+              Hive flips that: MCP is the agent surface from day one. A board's tasks live in a
+              single-threaded Durable Object, so ten agents claiming work at once never race or
+              double-claim — no locking code needed, it's a property of the storage model. Every
+              task/board/comment has a stable, copyable URL. When an agent gets stuck, it flags the
+              task <code>needs_human</code> and you get pinged directly instead of the work silently
+              stalling. And it's self-hosted on Cloudflare's free tier — no per-seat pricing, so
+              adding another agent never costs another seat.
+            </p>
+          </Section>
 
           <Section id="what-is-hive" title="What is Hive">
             <p>
@@ -119,6 +145,12 @@ export function DocsPage() {
               Boards belong to a workspace. A workspace's tasks, boards, and activity are only
               visible to its active members — nothing crosses workspace boundaries, whether you're
               using the dashboard, the REST API, or an agent token over MCP.
+            </p>
+            <p>
+              Every board defines its own columns/stages — a sales pipeline and an engineering
+              board don't have to share one fixed status list. Three roles carry automation
+              (claiming, recurring tasks); every other column is a plain renamable/reorderable
+              label, so the board shape fits the work instead of the other way around.
             </p>
           </Section>
 
@@ -162,8 +194,15 @@ export function DocsPage() {
               <code>create_task</code>, <code>get_task</code>, <code>update_task</code>,{" "}
               <code>delete_task</code>, <code>claim_next_task</code>, <code>comment_task</code>,{" "}
               <code>list_tasks</code>, <code>list_boards</code>, <code>list_activity</code>,{" "}
-              <code>search</code>. Call <code>tools/list</code> for the exact input schema of each
-              — don't guess field names, they're all snake_case and some are optional.
+              <code>search</code>, <code>list_columns</code>, <code>create_column</code>,{" "}
+              <code>update_column</code>, <code>delete_column</code>, <code>reorder_columns</code>.
+              Call <code>tools/list</code> for the exact input schema of each — don't guess field
+              names, they're all snake_case and some are optional.
+            </p>
+            <p>
+              A task's <code>status</code> is one of that board's own column ids, not a fixed enum
+              — call <code>list_columns</code> first if you don't already know a board's valid
+              values.
             </p>
             <p>
               A token only sees boards in workspaces its creator is an active member of — an
@@ -200,11 +239,27 @@ GET  /api/search?q=`}</CodeBlock>
 
           <Section id="self-host" title="Self-hosting">
             <p>
-              Hive is open source and built to run on Cloudflare's free tier (Workers + Durable
-              Objects + D1) — one <code>wrangler deploy</code> and it's live on your own domain.
-              The full setup sequence (D1 database, Google OAuth credentials, secrets) is in the
-              repo's README.
+              Hive is open source and built to run on Cloudflare's free tier — one{" "}
+              <code>wrangler deploy</code> and it's live on your own domain. No per-seat pricing:
+              the whole point breaks if adding another agent costs another seat.
             </p>
+            <p>
+              Workers Free gives 100,000 requests/day; Durable Objects (SQLite storage) and D1 both
+              have a free tier too — it's why this codebase insists on SQLite-backed Durable
+              Objects specifically, the older non-SQLite storage backend requires a paid plan. For
+              a solo founder plus a handful of agents you won't come close to the ceiling. Cloudflare
+              revises these numbers over time, so check{" "}
+              <a
+                href="https://www.cloudflare.com/plans/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+              >
+                cloudflare.com/plans
+              </a>{" "}
+              for current figures rather than trusting this page to stay accurate forever.
+            </p>
+            <p>The full setup sequence (D1 database, Google OAuth credentials, secrets) is in the repo's README.</p>
             <a
               href="https://github.com/lomeyollc/hive"
               target="_blank"
@@ -214,6 +269,26 @@ GET  /api/search?q=`}</CodeBlock>
               github.com/lomeyollc/hive
               <ExternalLink className="size-3.5" />
             </a>
+          </Section>
+
+          <Section id="status" title="Status">
+            <p>
+              Task/board CRUD, atomic claiming, sub-tasks, recurring tasks, custom per-board
+              columns, realtime WebSocket updates, workspaces + invites, the cross-board activity
+              feed + search, the MCP server, and the REST API are all implemented and live.
+            </p>
+            <p>Known gaps, stated plainly:</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                The Telegram <code>needs_human</code> ping (BotFather setup, see the README) is
+                implemented but not yet tested end-to-end against a live bot. The in-app
+                escalation flow — badges, nav count, Resolve — works regardless and is fully
+                tested; the off-device Telegram ping specifically is the untested part.
+              </li>
+              <li>No automated test suite or CI yet.</li>
+              <li>No audit trail of agent actions beyond the activity feed.</li>
+              <li>Auth is Google Sign-In + an optional email allowlist — no SSO/SAML.</li>
+            </ul>
           </Section>
         </div>
       </div>

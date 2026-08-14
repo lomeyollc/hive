@@ -2,14 +2,18 @@ import { DurableObject } from "cloudflare:workers";
 import {
   type BoardEvent,
   type ClaimNextTaskFilter,
+  type Column,
+  type ColumnRole,
   type Comment,
   type CreateCommentInput,
+  type CreateColumnInput,
   type CreateTaskInput,
   type ListTasksFilter,
   type RecurrenceInterval,
   type Task,
   type TaskPriority,
   type TaskStatus,
+  type UpdateColumnInput,
   type UpdateTaskInput,
   NotFoundError,
   ValidationError,
@@ -45,19 +49,31 @@ import { needsHumanPingMessage, sendTelegramMessage } from "../notify/telegram";
  *   claimNextTask(filter?): Task | null
  *   commentTask(taskId, input): Comment
  *   listComments(taskId): Comment[]
+ *   listColumns(): Column[]
+ *   createColumn(input): Column
+ *   updateColumn(id, patch): Column
+ *   deleteColumn(id, reassignTo?): void
+ *   reorderColumns(orderedIds): Column[]
  *
  * All of the above throw NotFoundError / ValidationError (see types.ts) on
  * bad input — callers should branch on `error.name`, not `instanceof`.
  *
+ * A task's `status` is a per-board column id, not a fixed enum — see the
+ * doc comment on TaskStatus/Column in types.ts. Three roles carry
+ * automation (open/active/done); every other column is a plain label.
+ *
  * ── Secondary interface: fetch() routes ─────────────────────────────────
  * fetch() exists mainly because a WebSocket upgrade MUST go through it (RPC
- * has no way to hand back a 101 response). It also exposes the same
- * operations as plain HTTP/JSON for anything that would rather issue a
- * Request than hold a typed RPC stub — each route is a thin wrapper that
- * calls the RPC method above and serializes the result, so there is exactly
- * one implementation of each operation. Paths are relative to whatever the
- * caller forwards to this DO's fetch() (the parent Worker owns stripping any
- * `/ws/:board` or `/api/boards/:board` prefix before forwarding):
+ * has no way to hand back a 101 response). It also exposes the same task/
+ * comment operations as plain HTTP/JSON for anything that would rather
+ * issue a Request than hold a typed RPC stub — each route is a thin
+ * wrapper that calls the RPC method above and serializes the result, so
+ * there is exactly one implementation of each operation. Column ops are
+ * RPC-only for now (REST/MCP both call the RPC methods directly, same as
+ * every other write in this codebase — see the doc comment above). Paths
+ * are relative to whatever the caller forwards to this DO's fetch() (the
+ * parent Worker owns stripping any `/ws/:board` or `/api/boards/:board`
+ * prefix before forwarding):
  *
  *   GET    /tasks                  list tasks   ?status=&assignee=&label=
  *   POST   /tasks                  create task  body: CreateTaskInput
@@ -210,6 +226,62 @@ export class BoardDO extends DurableObject<Env> {
       `);
       sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (4, ?)", new Date().toISOString());
     }
+
+    if (version < 5) {
+      // Custom columns: a board's `status` values are no longer a fixed
+      // 5-value enum shared by every board — they're this board's own
+      // ordered `columns` rows. Seeding ids identical to the old fixed
+      // statuses means every existing task's `status` is still a valid
+      // column id with zero data migration. The CHECK constraint that
+      // used to pin status to those 5 values has to go (SQLite can't
+      // ALTER a CHECK in place), so this is the same rebuild pattern v3
+      // used. Only 3 columns carry automation roles (see types.ts) —
+      // "blocked" and "planned" keep their old names but get role NULL,
+      // exactly like any other custom column from here on.
+      sql.exec(`
+        CREATE TABLE columns (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          role TEXT CHECK(role IN ('open','active','done') OR role IS NULL)
+        );
+        INSERT INTO columns (id, name, position, role) VALUES
+          ('planned', 'Backlog', 0, NULL),
+          ('open', 'Open', 1, 'open'),
+          ('in_progress', 'In Progress', 2, 'active'),
+          ('blocked', 'Blocked', 3, NULL),
+          ('done', 'Done', 4, 'done');
+
+        CREATE TABLE tasks_v5 (
+          id TEXT PRIMARY KEY,
+          board_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT NOT NULL DEFAULT 'open',
+          priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
+          assignee TEXT,
+          labels TEXT,
+          due_date TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by TEXT,
+          claimed_by TEXT,
+          version INTEGER NOT NULL DEFAULT 0,
+          needs_human INTEGER NOT NULL DEFAULT 0,
+          needs_human_reason TEXT,
+          parent_task_id TEXT,
+          recurrence TEXT
+        );
+        INSERT INTO tasks_v5 SELECT * FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_v5 RENAME TO tasks;
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
+        CREATE INDEX IF NOT EXISTS idx_tasks_needs_human ON tasks(needs_human);
+        CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+      `);
+      sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (5, ?)", new Date().toISOString());
+    }
   }
 
   /** The board slug this DO instance owns. Requires the DO to have been created via `getByName(slug)`. */
@@ -226,6 +298,145 @@ export class BoardDO extends DurableObject<Env> {
     return this.#boardId;
   }
 
+  // ── RPC: columns ─────────────────────────────────────────────────────
+
+  listColumns(): Column[] {
+    return this.ctx.storage.sql
+      .exec<ColumnRow>("SELECT * FROM columns ORDER BY position ASC")
+      .toArray()
+      .map(toColumn);
+  }
+
+  createColumn(input: CreateColumnInput): Column {
+    const name = input.name?.trim();
+    if (!name) {
+      throw new ValidationError("name is required");
+    }
+
+    let id = slugifyColumnName(name);
+    const taken = this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM columns WHERE id = ?", id).toArray();
+    if (taken.length > 0) {
+      id = `${id}_${crypto.randomUUID().slice(0, 6)}`;
+    }
+    const position = this.ctx.storage.sql
+      .exec<{ next: number }>("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM columns")
+      .one().next;
+
+    this.ctx.storage.sql.exec(
+      "INSERT INTO columns (id, name, position, role) VALUES (?, ?, ?, NULL)",
+      id,
+      name,
+      position,
+    );
+    const column: Column = { id, name, position, role: null };
+    this.#broadcast({ type: "column.created", boardId: this.boardId, column, at: new Date().toISOString() });
+    return column;
+  }
+
+  updateColumn(id: string, patch: UpdateColumnInput): Column {
+    const existing = this.#getColumnRow(id);
+    const name = patch.name !== undefined ? patch.name.trim() : existing.name;
+    if (!name) {
+      throw new ValidationError("name cannot be blank");
+    }
+    this.ctx.storage.sql.exec("UPDATE columns SET name = ? WHERE id = ?", name, id);
+    const column: Column = { id, name, position: existing.position, role: existing.role as ColumnRole | null };
+    this.#broadcast({ type: "column.updated", boardId: this.boardId, column, at: new Date().toISOString() });
+    return column;
+  }
+
+  /**
+   * A role-bearing column (open/active/done) can never be deleted — that
+   * would leave claimNextTask or recurrence with no column to act on.
+   * Rename it instead. A custom column with tasks in it requires
+   * `reassignTo` (another existing column's id) so nothing is silently
+   * orphaned.
+   */
+  deleteColumn(id: string, reassignTo?: string): void {
+    const existing = this.#getColumnRow(id);
+    if (existing.role !== null) {
+      throw new ValidationError(
+        `column "${id}" has role "${existing.role}" and can't be deleted — rename it instead`,
+      );
+    }
+    const remaining = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM columns").one().n;
+    if (remaining <= 1) {
+      throw new ValidationError("a board must have at least one column");
+    }
+
+    const taskCount = this.ctx.storage.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE status = ?", id)
+      .one().n;
+    if (taskCount > 0) {
+      if (!reassignTo) {
+        throw new ValidationError(
+          `column "${id}" has ${taskCount} task(s) — pass reassignTo (another column id) to move them first`,
+        );
+      }
+      if (reassignTo === id) {
+        throw new ValidationError("reassignTo must be a different column");
+      }
+      this.#getColumnRow(reassignTo); // throws NotFoundError if it doesn't exist
+      this.ctx.storage.sql.exec("UPDATE tasks SET status = ? WHERE status = ?", reassignTo, id);
+    }
+
+    this.ctx.storage.sql.exec("DELETE FROM columns WHERE id = ?", id);
+    this.#broadcast({ type: "column.deleted", boardId: this.boardId, columnId: id, at: new Date().toISOString() });
+  }
+
+  /** Full reorder — pass every column id in the board in the desired order. */
+  reorderColumns(orderedIds: string[]): Column[] {
+    const current = this.listColumns();
+    if (orderedIds.length !== current.length || !current.every((c) => orderedIds.includes(c.id))) {
+      throw new ValidationError("orderedIds must contain exactly this board's current column ids");
+    }
+    orderedIds.forEach((id, position) => {
+      this.ctx.storage.sql.exec("UPDATE columns SET position = ? WHERE id = ?", position, id);
+    });
+    const columns = this.listColumns();
+    this.#broadcast({ type: "columns.reordered", boardId: this.boardId, columns, at: new Date().toISOString() });
+    return columns;
+  }
+
+  #getColumnRow(id: string): ColumnRow {
+    const row = this.ctx.storage.sql.exec<ColumnRow>("SELECT * FROM columns WHERE id = ?", id).toArray()[0];
+    if (!row) {
+      throw new NotFoundError(`column "${id}" not found`);
+    }
+    return row;
+  }
+
+  /** The column new tasks land in when no status is given, and the pool claimNextTask() draws from. */
+  #openColumnId(): string {
+    const row = this.ctx.storage.sql
+      .exec<{ id: string }>("SELECT id FROM columns WHERE role = 'open' ORDER BY position ASC LIMIT 1")
+      .toArray()[0];
+    if (!row) {
+      throw new ValidationError(
+        `board "${this.boardId}" has no column with role "open" — claiming/default status needs one`,
+      );
+    }
+    return row.id;
+  }
+
+  /** The column claimNextTask() moves a claimed task into. */
+  #activeColumnId(): string {
+    const row = this.ctx.storage.sql
+      .exec<{ id: string }>("SELECT id FROM columns WHERE role = 'active' ORDER BY position ASC LIMIT 1")
+      .toArray()[0];
+    if (!row) {
+      throw new ValidationError(
+        `board "${this.boardId}" has no column with role "active" — claiming needs one`,
+      );
+    }
+    return row.id;
+  }
+
+  #isDoneColumn(id: string): boolean {
+    const row = this.ctx.storage.sql.exec<{ role: string | null }>("SELECT role FROM columns WHERE id = ?", id).toArray()[0];
+    return row?.role === "done";
+  }
+
   // ── RPC: tasks ───────────────────────────────────────────────────────
 
   createTask(input: CreateTaskInput): Task {
@@ -233,6 +444,7 @@ export class BoardDO extends DurableObject<Env> {
     if (!title) {
       throw new ValidationError("title is required");
     }
+    const status = input.status ? this.#getColumnRow(input.status).id : this.#openColumnId();
 
     const now = new Date().toISOString();
     const row: TaskRow = {
@@ -240,7 +452,7 @@ export class BoardDO extends DurableObject<Env> {
       board_id: this.boardId,
       title,
       description: input.description ?? null,
-      status: input.status ?? "open",
+      status,
       priority: input.priority ?? "normal",
       assignee: input.assignee ?? null,
       labels: JSON.stringify(input.labels ?? []),
@@ -338,6 +550,9 @@ export class BoardDO extends DurableObject<Env> {
     if (patch.title !== undefined && !patch.title.trim()) {
       throw new ValidationError("title cannot be blank");
     }
+    if (patch.status !== undefined) {
+      this.#getColumnRow(patch.status); // throws NotFoundError if not a valid column for this board
+    }
 
     const now = new Date().toISOString();
     const next: TaskRow = {
@@ -392,7 +607,7 @@ export class BoardDO extends DurableObject<Env> {
     // immediately, in the same call — no cron needed, and it's naturally
     // race-free for the same reason claimNextTask is (single-threaded DO,
     // no await between the completion write and this one).
-    if (task.status === "done" && existing.status !== "done" && task.recurrence) {
+    if (task.status !== existing.status && task.recurrence && this.#isDoneColumn(task.status)) {
       this.createTask({
         title: task.title,
         description: task.description ?? undefined,
@@ -446,8 +661,10 @@ export class BoardDO extends DurableObject<Env> {
    * moves on to the next matching row (or gets null).
    */
   claimNextTask(filter: ClaimNextTaskFilter = {}, claimedBy?: string): Task | null {
-    const clauses: string[] = ["board_id = ?", "status = 'open'", "claimed_by IS NULL"];
-    const params: SqlBindable[] = [this.boardId];
+    const openColumnId = this.#openColumnId();
+    const activeColumnId = this.#activeColumnId();
+    const clauses: string[] = ["board_id = ?", "status = ?", "claimed_by IS NULL"];
+    const params: SqlBindable[] = [this.boardId, openColumnId];
 
     if (filter.assignee) {
       clauses.push("assignee = ?");
@@ -466,7 +683,7 @@ export class BoardDO extends DurableObject<Env> {
     const row = this.ctx.storage.sql
       .exec<TaskRow>(
         `UPDATE tasks
-         SET claimed_by = ?, status = 'in_progress', version = version + 1, updated_at = ?
+         SET claimed_by = ?, status = ?, version = version + 1, updated_at = ?
          WHERE id = (
            SELECT id FROM tasks
            WHERE ${clauses.join(" AND ")}
@@ -477,6 +694,7 @@ export class BoardDO extends DurableObject<Env> {
          )
          RETURNING *`,
         claimedBy ?? null,
+        activeColumnId,
         now,
         ...params,
       )
@@ -834,6 +1052,27 @@ interface CommentRow extends Record<string, SqlStorageValue> {
   author: string | null;
   body: string;
   created_at: string;
+}
+
+interface ColumnRow extends Record<string, SqlStorageValue> {
+  id: string;
+  name: string;
+  position: number;
+  role: string | null;
+}
+
+function toColumn(row: ColumnRow): Column {
+  return { id: row.id, name: row.name, position: row.position, role: row.role as ColumnRole | null };
+}
+
+function slugifyColumnName(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/(^_|_$)/g, "") || "column"
+  );
 }
 
 type SqlBindable = string | number | null;

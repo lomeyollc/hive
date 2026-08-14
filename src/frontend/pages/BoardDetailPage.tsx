@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Search, LayoutGrid, List as ListIcon } from "lucide-react";
 import { toast } from "sonner";
-import { claimTask, listTasks, updateTask } from "@/lib/api";
+import { claimTask, getBoard, listTasks, updateTask } from "@/lib/api";
 import { useBoardSocket } from "@/hooks/use-board-socket";
-import type { Comment, Task, TaskStatus } from "@/lib/types";
+import type { Column, Comment, Task, TaskStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,19 +16,11 @@ import { TaskCard } from "@/components/boards/TaskCard";
 import { TaskDetailSheet } from "@/components/boards/TaskDetailSheet";
 import { KanbanBoard } from "@/components/boards/KanbanBoard";
 
-const TABS: { value: "all" | TaskStatus; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "planned", label: "Backlog" },
-  { value: "open", label: "Open" },
-  { value: "in_progress", label: "In progress" },
-  { value: "blocked", label: "Blocked" },
-  { value: "done", label: "Done" },
-];
-
 export function BoardDetailPage() {
   const { slug, taskId } = useParams<{ slug: string; taskId?: string }>();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [columns, setColumns] = useState<Column[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | TaskStatus>("all");
   const [search, setSearch] = useState("");
@@ -43,12 +35,15 @@ export function BoardDetailPage() {
     if (!slug) return;
     let cancelled = false;
     setTasks(null);
-    listTasks(slug)
-      .then((data) => {
-        if (!cancelled) setTasks(data);
+    setColumns(null);
+    Promise.all([listTasks(slug), getBoard(slug)])
+      .then(([taskData, board]) => {
+        if (cancelled) return;
+        setTasks(taskData);
+        setColumns(board.columns ?? []);
       })
       .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : "Failed to load tasks";
+        const message = err instanceof Error ? err.message : "Failed to load board";
         if (!cancelled) setError(message);
         toast.error(message);
       });
@@ -56,6 +51,15 @@ export function BoardDetailPage() {
       cancelled = true;
     };
   }, [slug]);
+
+  const orderedColumns = useMemo(
+    () => [...(columns ?? [])].sort((a, b) => a.position - b.position),
+    [columns],
+  );
+  const tabs = useMemo(
+    () => [{ value: "all" as const, label: "All" }, ...orderedColumns.map((c) => ({ value: c.id, label: c.name }))],
+    [orderedColumns],
+  );
 
   const upsertTask = useCallback((task: Task) => {
     setTasks((prev) => {
@@ -84,6 +88,23 @@ export function BoardDetailPage() {
           case "comment.created":
             setLiveComments((prev) => [...prev, msg.comment]);
             break;
+          case "column.created":
+          case "column.updated":
+            setColumns((prev) => {
+              if (!prev) return prev;
+              const idx = prev.findIndex((c) => c.id === msg.column.id);
+              if (idx === -1) return [...prev, msg.column];
+              const next = [...prev];
+              next[idx] = msg.column;
+              return next;
+            });
+            break;
+          case "column.deleted":
+            setColumns((prev) => prev?.filter((c) => c.id !== msg.columnId) ?? prev);
+            break;
+          case "columns.reordered":
+            setColumns(msg.columns);
+            break;
         }
       },
       [upsertTask],
@@ -91,10 +112,11 @@ export function BoardDetailPage() {
   );
 
   const counts = useMemo(() => {
-    const base: Record<TaskStatus, number> = { planned: 0, open: 0, in_progress: 0, blocked: 0, done: 0 };
-    for (const t of tasks ?? []) base[t.status] += 1;
+    const base: Record<TaskStatus, number> = {};
+    for (const c of orderedColumns) base[c.id] = 0;
+    for (const t of tasks ?? []) base[t.status] = (base[t.status] ?? 0) + 1;
     return base;
-  }, [tasks]);
+  }, [tasks, orderedColumns]);
 
   const searchedTasks = useMemo(() => {
     if (!tasks) return [];
@@ -145,33 +167,40 @@ export function BoardDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon-sm" asChild>
+      <div className="flex flex-wrap items-center justify-between gap-y-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button variant="ghost" size="icon-sm" asChild className="shrink-0">
             <Link to="/boards">
               <ArrowLeft className="size-4" />
             </Link>
           </Button>
-          <div>
-            <h1 className="text-xl font-semibold">{slug}</h1>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold">{slug}</h1>
             <p className="text-sm text-muted-foreground">
               {tasks ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "Loading…"}
             </p>
           </div>
-          <CopyLinkButton path={`/boards/${slug}`} />
-          <BoardSettingsMenu slug={slug} onDeleted={() => navigate("/boards")} />
+          <CopyLinkButton path={`/boards/${slug}`} className="shrink-0" />
+          <div className="shrink-0">
+            <BoardSettingsMenu
+              slug={slug}
+              columns={orderedColumns}
+              onDeleted={() => navigate("/boards")}
+              onColumnsChanged={setColumns}
+            />
+          </div>
         </div>
-        <CreateTaskDialog boardSlug={slug} onCreated={upsertTask} />
+        {columns && <CreateTaskDialog boardSlug={slug} columns={columns} onCreated={upsertTask} />}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         {view === "list" ? (
           <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
             <TabsList>
-              {TABS.map((tab) => (
+              {tabs.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value}>
                   {tab.label}
-                  {tab.value !== "all" && counts[tab.value] > 0 && (
+                  {tab.value !== "all" && (counts[tab.value] ?? 0) > 0 && (
                     <span className="ml-1.5 text-xs text-muted-foreground">{counts[tab.value]}</span>
                   )}
                 </TabsTrigger>
@@ -231,9 +260,10 @@ export function BoardDetailPage() {
         </div>
       )}
 
-      {tasks && view === "board" && (
+      {tasks && columns && view === "board" && (
         <KanbanBoard
           tasks={searchedTasks}
+          columns={columns}
           onOpen={(t) => navigate(`/boards/${slug}/tasks/${t.id}`)}
           onMove={handleMove}
         />
@@ -249,6 +279,7 @@ export function BoardDetailPage() {
             <TaskCard
               key={task.id}
               task={task}
+              columns={orderedColumns}
               onOpen={(t) => navigate(`/boards/${slug}/tasks/${t.id}`)}
               onClaim={handleClaim}
               claiming={claimingId === task.id}
@@ -261,6 +292,7 @@ export function BoardDetailPage() {
         boardSlug={slug}
         task={selectedTask}
         allTasks={tasks ?? []}
+        columns={orderedColumns}
         onOpenTask={(id) => navigate(`/boards/${slug}/tasks/${id}`)}
         onOpenChange={(open) => !open && navigate(`/boards/${slug}`)}
         onTaskUpdated={upsertTask}

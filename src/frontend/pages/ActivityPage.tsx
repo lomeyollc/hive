@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { listActivity, search, type ActivityItem, type SearchCommentResult, type SearchTaskResult } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/components/boards/StatusBadge";
+import { GenericStatusBadge } from "@/components/boards/StatusBadge";
 import { Search as SearchIcon, Plus, Pencil, Hand, Trash2, MessageSquare } from "lucide-react";
 
 const TYPE_ICON: Record<ActivityItem["type"], typeof Plus> = {
@@ -103,7 +103,7 @@ export function ActivityPage() {
                   className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/50"
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <StatusBadge status={t.status} />
+                    <GenericStatusBadge status={t.status} />
                     <span className="truncate">{t.title}</span>
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">{t.board_name}</span>

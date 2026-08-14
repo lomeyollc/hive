@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { createTask } from "@/lib/api";
-import type { Task, TaskPriority, TaskStatus } from "@/lib/types";
+import type { Column, Task, TaskPriority, TaskStatus } from "@/lib/types";
 import { PRIORITY_OPTIONS } from "@/components/boards/PriorityBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,16 +21,19 @@ import { Plus, AlertTriangle } from "lucide-react";
 
 export function CreateTaskDialog({
   boardSlug,
+  columns,
   onCreated,
 }: {
   boardSlug: string;
+  columns: Column[];
   onCreated: (task: Task) => void;
 }) {
+  const defaultColumnId = () => columns.find((c) => c.role === "open")?.id ?? columns[0]?.id ?? "";
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [status, setStatus] = useState<TaskStatus>("open");
+  const [status, setStatus] = useState<TaskStatus>(defaultColumnId());
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [assignee, setAssignee] = useState("");
   const [labels, setLabels] = useState("");
@@ -41,7 +44,7 @@ export function CreateTaskDialog({
   function reset() {
     setTitle("");
     setDescription("");
-    setStatus("open");
+    setStatus(defaultColumnId());
     setPriority("normal");
     setAssignee("");
     setLabels("");
@@ -130,8 +133,13 @@ export function CreateTaskDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="planned">Backlog</SelectItem>
-                    <SelectItem value="open">Open</SelectItem>
+                    {[...columns]
+                      .sort((a, b) => a.position - b.position)
+                      .map((column) => (
+                        <SelectItem key={column.id} value={column.id}>
+                          {column.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

@@ -1,21 +1,27 @@
 import { Hand, AlertTriangle } from "lucide-react";
-import type { Task } from "@/lib/types";
+import type { Column, Task } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/boards/StatusBadge";
+import { GenericStatusBadge, StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
 
 export function TaskCard({
   task,
+  columns,
   onOpen,
   onClaim,
   claiming,
 }: {
   task: Task;
+  /** This board's columns, for a proper named/colored status badge. Falls
+   *  back to a generic one if the task's status isn't among them (e.g. a
+   *  stale client mid-column-delete). */
+  columns: Column[];
   onOpen: (task: Task) => void;
   onClaim: (task: Task) => void;
   claiming: boolean;
 }) {
+  const column = columns.find((c) => c.id === task.status);
   return (
     <Card
       className={`cursor-pointer gap-2 py-3 transition-colors hover:border-foreground/30 ${
@@ -30,7 +36,7 @@ export function TaskCard({
             <p className="truncate text-sm font-medium">{task.title}</p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <StatusBadge status={task.status} />
+            {column ? <StatusBadge column={column} /> : <GenericStatusBadge status={task.status} />}
             <PriorityBadge priority={task.priority} />
             {task.assignee && (
               <span className="text-xs text-muted-foreground">→ {task.assignee}</span>
