@@ -5,3 +5,8 @@
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 SESSION_SECRET=
+
+# Optional. Comma-separated emails allowed to sign in. Unset = any
+# Google-verified email is trusted (fine for a private instance whose URL
+# you don't share; set this for a public-facing one).
+ALLOWED_EMAILS=

@@ -1,23 +1,48 @@
 # src/worker/auth
 
-Empty scaffold. The next-phase agent implements two things here:
+Google Sign-In session auth (for the human) + API token generation (for
+agents). Routed from `src/worker/index.ts` for any `/auth/*` request.
 
-1. **Human login (Google Sign-In)** — frontend uses Google Identity Services
-   to get an ID token, POSTs it to a route here. Verify it server-side
-   (either fetch `https://oauth2.googleapis.com/tokeninfo?id_token=...` and
-   check `aud`/`email`, or do a proper JWKS verify against
-   `https://www.googleapis.com/oauth2/v3/certs`), then issue an HMAC-signed
-   httpOnly session cookie using Web Crypto `SubtleCrypto.sign("HMAC", ...)`
-   with `SESSION_SECRET`. No external JWT library needed.
+## Files
 
-2. **Agent auth (API tokens)** — once logged in, an authenticated
-   settings endpoint generates a long-lived Bearer token
-   (`crypto.randomUUID()` + extra random bytes), shows it once, and stores
-   only its SHA-256 hash in D1's `api_tokens` table (see
-   `migrations/0001_init.sql`) — never the plaintext. The REST API and the
-   MCP route (`src/worker/mcp`) both check `Authorization: Bearer <token>`
-   against that hash.
+- `routes.ts` — `handleAuthRequest(request, env)`, the `/auth/*` route
+  table. Routes: `POST /auth/google/callback`, `POST /auth/logout`,
+  `GET /auth/session`, `POST /auth/tokens`, `GET /auth/tokens`,
+  `DELETE /auth/tokens/:id`.
+- `google.ts` — verifies a Google ID token against
+  `https://oauth2.googleapis.com/tokeninfo`, checks `aud` == GOOGLE_CLIENT_ID,
+  expiry, `email_verified`, and (if `ALLOWED_EMAILS` is set) the allowlist.
+- `session.ts` — HMAC-SHA256-signed session cookie (Web Crypto
+  `SubtleCrypto`, `SESSION_SECRET`). Exports `requireSession(request, env)`
+  for other routes to import as the auth check.
+- `tokens.ts` — `generateApiToken()`, the plaintext-token generator
+  (`crypto.randomUUID()` bytes + extra `crypto.getRandomValues()` bytes,
+  base64url, `hive_` prefix).
+- `tokenHash.ts` — **shared** `hashToken(token)`. The MCP route's
+  Bearer-token check (`src/worker/mcp`) must hash tokens the same way to
+  look them up in D1's `api_tokens.token_hash` — import this function
+  rather than re-implementing SHA-256 hex hashing.
+- `base64url.ts`, `errors.ts` — small shared helpers.
+- `../env.d.ts` — declares `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` /
+  `SESSION_SECRET` / `ALLOWED_EMAILS` on the global `Env` type (these are
+  secrets, so `wrangler types` doesn't generate them).
 
-Secrets this needs (set via `wrangler secret put <NAME>`, never in
-`wrangler.jsonc`): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`SESSION_SECRET`. See `.dev.vars.example` for local dev.
+## Session cookie
+
+Cookie `hive_session`, `httpOnly; SameSite=Lax; Secure` (when the request
+is https). Value is `<base64url(JSON {email, exp})>.<base64url(HMAC-SHA256
+signature)>` — plaintext-readable payload, tamper-evident via the
+signature. 30-day expiry.
+
+## v1 authorization model
+
+Any successfully Google-verified email is trusted by default — this is a
+single-user (or small-trusted-set) self-hosted instance, so a self-hoster's
+main defense is simply not sharing their instance URL. Since it's cheap and
+meaningfully safer for a public open-source project, an explicit allowlist
+is also supported: set `ALLOWED_EMAILS` (comma-separated) and only those
+emails can sign in.
+
+Secrets (set via `wrangler secret put <NAME>`, never in `wrangler.jsonc`):
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, and optionally
+`ALLOWED_EMAILS`. See `.dev.vars.example` for local dev.

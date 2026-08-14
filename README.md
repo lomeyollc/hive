@@ -22,8 +22,9 @@ business logic has not been implemented yet.
 - **WebSockets** via the DO Hibernation API — the board's DO pushes live
   updates to every connected browser client.
 - **Auth** — Google Sign-In for the human (ID token verified server-side,
-  our own HMAC-signed session cookie); long-lived Bearer API tokens
-  (SHA-256 hashed in D1) for agents and the MCP server.
+  our own HMAC-signed session cookie; optionally restricted to an
+  `ALLOWED_EMAILS` allowlist); long-lived Bearer API tokens (SHA-256 hashed
+  in D1) for agents and the MCP server.
 - **MCP server** at `/mcp`, Bearer-token authenticated: `create_task`,
   `get_task`, `update_task`, `claim_next_task`, `comment_task`,
   `list_tasks`, `list_boards`.
@@ -44,14 +45,18 @@ business logic has not been implemented yet.
    npm run d1:migrate:remote
    ```
 5. Create a Google OAuth 2.0 client (Google Cloud Console → APIs & Services
-   → Credentials → OAuth client ID → Web application) and set its redirect
-   URI to `https://<your-worker>.workers.dev/auth/callback` (or your custom
-   domain).
+   → Credentials → OAuth client ID → Web application) and add
+   `https://<your-worker>.workers.dev` (or your custom domain) as an
+   **Authorized JavaScript origin**. Sign-in uses Google Identity Services'
+   client-side button (which POSTs an ID token to `/auth/google/callback`
+   for server-side verification), not a server-side redirect, so no
+   redirect URI is needed.
 6. Set secrets — never put these in `wrangler.jsonc`:
    ```bash
    npx wrangler secret put GOOGLE_CLIENT_ID
    npx wrangler secret put GOOGLE_CLIENT_SECRET
    npx wrangler secret put SESSION_SECRET   # any long random string
+   npx wrangler secret put ALLOWED_EMAILS   # optional: comma-separated allowlist
    ```
 7. Deploy:
    ```bash

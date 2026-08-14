@@ -1,4 +1,6 @@
+import { handleAuthRequest } from "./auth/routes";
 import { BoardDO } from "./durable-objects/BoardDO";
+import { handleMcpRequest } from "./mcp";
 
 /**
  * Hive Worker entry point.
@@ -30,14 +32,12 @@ export default {
       return new Response("Not implemented", { status: 501 });
     }
 
-    if (url.pathname.startsWith("/mcp/")) {
-      // TODO: MCP server route (Bearer-token authenticated)
-      return new Response("Not implemented", { status: 501 });
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
+      return handleMcpRequest(request, env);
     }
 
     if (url.pathname.startsWith("/auth/")) {
-      // TODO: Google Sign-In verification, session cookie, API tokens
-      return new Response("Not implemented", { status: 501 });
+      return handleAuthRequest(request, env);
     }
 
     if (url.pathname.startsWith("/ws/")) {
