@@ -1,0 +1,246 @@
+/**
+ * Single API client file — every fetch call the frontend makes lives here,
+ * on purpose, so reconciling exact paths/shapes with the backend agent's
+ * implementation (src/worker/api, src/worker/auth) is a one-file change.
+ *
+ * Contract:
+ *
+ *   Auth — VERIFIED live against src/worker/auth/routes.ts (implemented
+ *   concurrently by another agent during this build; confirmed by reading
+ *   its source, not guessed):
+ *     POST   /auth/google/callback   { credential: string }        -> { email: string }
+ *     GET    /auth/session                                          -> { email: string } | 401 { error }
+ *     POST   /auth/logout                                           -> 200 { ok: true }
+ *     GET    /auth/tokens                                           -> { tokens: ApiToken[] }  (label, not name)
+ *     POST   /auth/tokens            { label?: string }             -> CreatedApiToken (id, token, label, created_at)
+ *     DELETE /auth/tokens/:id                                       -> 200 { ok: true } | 404 { error }
+ *
+ *   Boards / tasks / comments — STILL A GUESS. src/worker/index.ts has
+ *   /api/* stubbed at 501 as of this build; reconcile against the real
+ *   REST routes once implemented.
+ *     GET    /api/boards                                            -> { boards: Board[] }
+ *     GET    /api/boards/:slug                                      -> { board: Board }
+ *     GET    /api/boards/:slug/tasks       ?status=&assignee=       -> { tasks: Task[] }
+ *     POST   /api/boards/:slug/tasks       CreateTaskInput          -> { task: Task }
+ *     PATCH  /api/boards/:slug/tasks/:id   Partial<Task>            -> { task: Task }
+ *     POST   /api/boards/:slug/tasks/:id/claim                      -> { task: Task }
+ *     GET    /api/boards/:slug/tasks/:id/comments                   -> { comments: Comment[] }
+ *     POST   /api/boards/:slug/tasks/:id/comments  { body: string } -> { comment: Comment }
+ *
+ *   Realtime
+ *     WS     /ws/boards/:slug  -> BoardSocketMessage JSON frames, see lib/types.ts
+ *
+ * TODO(integration): the auth agent's /auth/google/callback route may expect
+ * a different field name than `credential` (that's the field GIS's callback
+ * gives us) or return a different shape than { user }. Reconcile against the
+ * real route in src/worker/auth once it lands — this file is the only place
+ * that needs to change.
+ *
+ * Session auth uses an httpOnly cookie, so every call passes
+ * `credentials: "include"`. No Bearer token handling here — that's the
+ * agent/MCP auth path, not the browser's.
+ */
+import type {
+  ApiToken,
+  Board,
+  Comment,
+  CreatedApiToken,
+  CurrentUser,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from "./types";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    credentials: "include",
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      Accept: "application/json",
+    },
+    ...init,
+  });
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  let body: unknown = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Non-JSON response (e.g. the 501 "Not implemented" scaffold text) —
+      // surface it as the error message below.
+      body = text;
+    }
+  }
+
+  if (!res.ok) {
+    const message =
+      body && typeof body === "object" && "error" in body && typeof (body as { error?: unknown }).error === "string"
+        ? (body as { error: string }).error
+        : typeof body === "string"
+          ? body
+          : `Request failed: ${res.status}`;
+    throw new ApiError(res.status, message);
+  }
+
+  return body as T;
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+export async function fetchSession(): Promise<CurrentUser | null> {
+  try {
+    const data = await request<{ email: string }>("/auth/session");
+    return { email: data.email };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function signInWithGoogle(credential: string): Promise<CurrentUser> {
+  const data = await request<{ email: string }>("/auth/google/callback", {
+    method: "POST",
+    body: JSON.stringify({ credential }),
+  });
+  return { email: data.email };
+}
+
+export async function signOut(): Promise<void> {
+  await request<void>("/auth/logout", { method: "POST" });
+}
+
+export async function listApiTokens(): Promise<ApiToken[]> {
+  const data = await request<{ tokens: ApiToken[] }>("/auth/tokens");
+  return data.tokens;
+}
+
+export async function createApiToken(label: string): Promise<CreatedApiToken> {
+  return request<CreatedApiToken>("/auth/tokens", {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function revokeApiToken(id: string): Promise<void> {
+  await request<void>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Boards
+// ---------------------------------------------------------------------------
+
+export async function listBoards(): Promise<Board[]> {
+  const data = await request<{ boards: Board[] }>("/api/boards");
+  return data.boards;
+}
+
+export async function getBoard(slug: string): Promise<Board> {
+  const data = await request<{ board: Board }>(`/api/boards/${encodeURIComponent(slug)}`);
+  return data.board;
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+export interface TaskFilters {
+  status?: TaskStatus;
+  assignee?: string;
+}
+
+export async function listTasks(slug: string, filters: TaskFilters = {}): Promise<Task[]> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.assignee) params.set("assignee", filters.assignee);
+  const qs = params.toString();
+  const data = await request<{ tasks: Task[] }>(
+    `/api/boards/${encodeURIComponent(slug)}/tasks${qs ? `?${qs}` : ""}`,
+  );
+  return data.tasks;
+}
+
+export interface CreateTaskInput {
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  assignee?: string;
+  labels?: string[];
+  due_date?: string;
+}
+
+export async function createTask(slug: string, input: CreateTaskInput): Promise<Task> {
+  const data = await request<{ task: Task }>(`/api/boards/${encodeURIComponent(slug)}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.task;
+}
+
+export async function updateTask(
+  slug: string,
+  taskId: string,
+  patch: Partial<Pick<Task, "title" | "description" | "status" | "priority" | "assignee" | "labels" | "due_date">>,
+): Promise<Task> {
+  const data = await request<{ task: Task }>(
+    `/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.task;
+}
+
+export async function claimTask(slug: string, taskId: string): Promise<Task> {
+  const data = await request<{ task: Task }>(
+    `/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}/claim`,
+    { method: "POST" },
+  );
+  return data.task;
+}
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+export async function listComments(slug: string, taskId: string): Promise<Comment[]> {
+  const data = await request<{ comments: Comment[] }>(
+    `/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}/comments`,
+  );
+  return data.comments;
+}
+
+export async function createComment(slug: string, taskId: string, body: string): Promise<Comment> {
+  const data = await request<{ comment: Comment }>(
+    `/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}/comments`,
+    { method: "POST", body: JSON.stringify({ body }) },
+  );
+  return data.comment;
+}
+
+// ---------------------------------------------------------------------------
+// Realtime
+// ---------------------------------------------------------------------------
+
+/** Builds the board WebSocket URL. TODO(integration): confirm `/ws/boards/:slug`
+ *  matches the route the backend agent mounts under the `/ws/*` prefix in
+ *  wrangler.jsonc's run_worker_first list. */
+export function boardSocketUrl(slug: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws/boards/${encodeURIComponent(slug)}`;
+}

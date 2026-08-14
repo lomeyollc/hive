@@ -1,0 +1,80 @@
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { LayoutGrid, Settings, LogOut } from "lucide-react";
+import { useAuth } from "@/context/auth-context";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+
+function initials(email: string) {
+  return email.slice(0, 2).toUpperCase();
+}
+
+export function AppShell() {
+  const { user, signOut } = useAuth();
+
+  return (
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-b">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
+          <Link to="/boards" className="flex items-center gap-2 font-semibold">
+            <LayoutGrid className="size-5" />
+            Hive
+          </Link>
+
+          <nav className="flex items-center gap-1">
+            <NavLink
+              to="/boards"
+              className={({ isActive }) =>
+                `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                }`
+              }
+            >
+              Boards
+            </NavLink>
+
+            {user && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="ml-2 h-9 gap-2 px-2">
+                    <Avatar className="size-6">
+                      <AvatarFallback className="text-xs">{initials(user.email)}</AvatarFallback>
+                    </Avatar>
+                    <span className="hidden text-sm sm:inline">{user.email}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel className="font-normal">
+                    <span className="text-sm font-medium">{user.email}</span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/settings" className="flex items-center gap-2">
+                      <Settings className="size-4" />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void signOut()} className="flex items-center gap-2">
+                    <LogOut className="size-4" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </nav>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
