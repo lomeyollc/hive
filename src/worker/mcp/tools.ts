@@ -38,6 +38,28 @@ function boardStub(env: McpEnv, board: string): BoardDOStub {
   return env.BOARD_DO.getByName(board) as unknown as BoardDOStub;
 }
 
+/**
+ * Gate for every board-scoped tool (create/get/update/delete/claim/comment/
+ * list task). A token only acts within workspaces its owning human is an
+ * active member of — without this, any valid token could read/write any
+ * board by slug, regardless of who created the token. Throws (caught by
+ * each tool's own try/catch, surfaced as a normal `err()` result) rather
+ * than returning a boolean so callers can't forget to check it.
+ */
+async function requireBoardAccess(env: McpEnv, token: AuthedToken, board: string): Promise<void> {
+  const row = token.createdBy
+    ? await env.DB.prepare(
+        `SELECT 1 FROM boards b JOIN workspace_members m ON m.workspace_id = b.workspace_id
+         WHERE b.id = ? AND m.email = ? AND m.status = 'active' LIMIT 1`,
+      )
+        .bind(board, token.createdBy)
+        .first()
+    : null;
+  if (!row) {
+    throw new Error(`board "${board}" not found`);
+  }
+}
+
 /** Identity string recorded as `createdBy` / `claimedBy` for agent-driven writes. */
 function actorFor(token: AuthedToken): string {
   return token.name ? `agent:${token.name}` : `agent:${token.id}`;
@@ -93,6 +115,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
       recurrence,
     }) => {
       try {
+        await requireBoardAccess(env, token, board);
         const task = await boardStub(env, board).createTask({
           title,
           description,
@@ -126,6 +149,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, task_id }) => {
       try {
+        await requireBoardAccess(env, token, board);
         const task = await boardStub(env, board).getTask(task_id);
         return ok(task);
       } catch (e) {
@@ -170,6 +194,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, task_id, due_date, needs_human, needs_human_reason, parent_task_id, ...patch }) => {
       try {
+        await requireBoardAccess(env, token, board);
         const task = await boardStub(env, board).updateTask(task_id, {
           ...patch,
           dueDate: due_date,
@@ -201,6 +226,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, priority, assignee, label }) => {
       try {
+        await requireBoardAccess(env, token, board);
         const task = await boardStub(env, board).claimNextTask(
           { priority, assignee, label },
           actorFor(token)
@@ -224,6 +250,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, task_id }) => {
       try {
+        await requireBoardAccess(env, token, board);
         await boardStub(env, board).deleteTask(task_id);
         return ok({ deleted: task_id });
       } catch (e) {
@@ -246,6 +273,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, task_id, author, body }) => {
       try {
+        await requireBoardAccess(env, token, board);
         const comment = await boardStub(env, board).commentTask(task_id, { author, body });
         return ok(comment);
       } catch (e) {
@@ -272,6 +300,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, parent_task_id, ...filter }) => {
       try {
+        await requireBoardAccess(env, token, board);
         const tasks: Task[] = await boardStub(env, board).listTasks({ ...filter, parentTaskId: parent_task_id });
         return ok(tasks);
       } catch (e) {

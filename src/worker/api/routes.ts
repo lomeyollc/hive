@@ -160,6 +160,14 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (request.method === "POST") return await createBoard(request, env, session.email);
     }
 
+    // Every /api/boards/:slug... route below (board itself, its tasks, its
+    // comments) requires the caller to be an active member of the board's
+    // workspace — checked once here rather than per-handler. Without this,
+    // any signed-in user could read/write any board by guessing its slug.
+    if (parts.length >= 3 && parts[1] === "boards") {
+      await requireBoardWorkspace(env, parts[2], session.email);
+    }
+
     // /api/boards/:slug
     if (parts.length === 3 && parts[1] === "boards") {
       if (request.method === "GET") return await getBoard(env, parts[2], session.email);
@@ -359,6 +367,23 @@ async function isActiveMember(env: Env, workspaceId: string, email: string): Pro
     .bind(workspaceId, email)
     .first();
   return row !== null;
+}
+
+/**
+ * Gate for every /api/boards/:slug... route. Looks up the board's
+ * workspace and confirms the caller is an active member of it — throws
+ * NotFoundError (never 403, so a board's existence isn't leaked to
+ * outsiders) otherwise. Boards with no workspace_id are pre-migration
+ * legacy rows and are treated as inaccessible.
+ */
+async function requireBoardWorkspace(env: Env, slug: string, email: string): Promise<string> {
+  const row = await env.DB.prepare(`SELECT workspace_id FROM boards WHERE id = ?`)
+    .bind(slug)
+    .first<{ workspace_id: string | null }>();
+  if (!row || !row.workspace_id || !(await isActiveMember(env, row.workspace_id, email))) {
+    throw new NotFoundError(`board "${slug}" not found`);
+  }
+  return row.workspace_id;
 }
 
 async function listWorkspaces(env: Env, email: string): Promise<Response> {

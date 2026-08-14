@@ -27,6 +27,8 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
   async function openRename() {
@@ -63,14 +65,15 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
   }
 
   async function handleDelete() {
-    if (!window.confirm(`Delete board "${slug}" and all its tasks from view? This can't be undone.`)) return;
     setDeleting(true);
     try {
       await deleteBoard(slug);
       toast.success("Board deleted");
+      setDeleteOpen(false);
       onDeleted();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete board");
+    } finally {
       setDeleting(false);
     }
   }
@@ -88,9 +91,15 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
             <Pencil className="size-3.5" />
             Rename board
           </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" disabled={deleting} onSelect={handleDelete}>
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={() => {
+              setDeleteConfirmText("");
+              setDeleteOpen(true);
+            }}
+          >
             <Trash2 className="size-3.5" />
-            {deleting ? "Deleting…" : "Delete board"}
+            Delete board
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -132,6 +141,38 @@ export function BoardSettingsMenu({ slug, onDeleted }: { slug: string; onDeleted
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete board</DialogTitle>
+            <DialogDescription>
+              This hides "{slug}" and its tasks from the app — it isn't a full wipe. Creating a new board with
+              the same id later would bring the old tasks back. Type <span className="font-mono">{slug}</span> to
+              confirm.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            <Input
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={slug}
+              autoFocus
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              disabled={deleting || deleteConfirmText !== slug}
+              onClick={handleDelete}
+            >
+              {deleting ? "Deleting…" : "Delete board"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
