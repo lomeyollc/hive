@@ -13,7 +13,10 @@ import { generateApiToken } from "./tokens";
  *                                   token from the frontend's Google
  *                                   Identity Services button. On success,
  *                                   sets the session cookie and returns
- *                                   { email }.
+ *                                   { email }. First-ever sign-in for that
+ *                                   email (zero workspace_members rows)
+ *                                   auto-creates a personal workspace —
+ *                                   see ensureDefaultWorkspace below.
  *   POST   /auth/logout           - clears the session cookie.
  *   GET    /auth/session          - returns { email } if logged in, 401
  *                                   otherwise. Lets the frontend check
@@ -98,9 +101,39 @@ async function handleGoogleCallback(request: Request, env: Env, secure: boolean)
   const idToken = body.credential ?? body.id_token ?? "";
 
   const user = await verifyGoogleIdToken(idToken, env);
+  await ensureDefaultWorkspace(env, user.email);
   const cookie = await createSessionCookie(user.email, env, secure);
 
   return json({ email: user.email }, 200, { "Set-Cookie": cookie });
+}
+
+/**
+ * First-ever sign-in for an email with zero workspace_members rows gets a
+ * personal workspace, owned and active immediately — otherwise a brand new
+ * user lands on the "no workspace yet" empty state and has to know to
+ * click "Create workspace" before anything else works. Deliberately
+ * scoped to ZERO rows (not "zero active"): an email arriving via an invite
+ * link already has a row (status 'invited') and should go through the
+ * normal accept-invite flow, not get a second, unrelated workspace.
+ */
+async function ensureDefaultWorkspace(env: Env, email: string): Promise<void> {
+  const existing = await env.DB.prepare(`SELECT 1 FROM workspace_members WHERE email = ? LIMIT 1`)
+    .bind(email)
+    .first();
+  if (existing) return;
+
+  const localPart = email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const id = `${localPart || "workspace"}-${crypto.randomUUID().slice(0, 8)}`;
+  const name = `${localPart || "My"}'s workspace`;
+  const now = new Date().toISOString();
+
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)`).bind(id, name, now),
+    env.DB.prepare(
+      `INSERT INTO workspace_members (id, workspace_id, email, role, status, invited_by, invited_at, accepted_at)
+       VALUES (?, ?, ?, 'owner', 'active', ?, ?, ?)`,
+    ).bind(crypto.randomUUID(), id, email, email, now, now),
+  ]);
 }
 
 async function handleCreateToken(request: Request, env: Env, ownerEmail: string): Promise<Response> {

@@ -1,4 +1,4 @@
-<p align="center"><img src=".github/logo.png" width="96" height="96" alt="Hive logo"></p>
+<p align="center"><img src=".github/readme-banner.png" width="800" alt="Hive — one board, you and your AI agents"></p>
 
 # Hive
 
