@@ -6,6 +6,7 @@ import {
   type CreateCommentInput,
   type CreateTaskInput,
   type ListTasksFilter,
+  type RecurrenceInterval,
   type Task,
   type TaskPriority,
   type TaskStatus,
@@ -196,6 +197,19 @@ export class BoardDO extends DurableObject<Env> {
       `);
       sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (3, ?)", new Date().toISOString());
     }
+
+    if (version < 4) {
+      // Sub-tasks (parent_task_id, a plain self-reference — no FK enforced,
+      // same as every other loosely-typed column here) and recurrence (a
+      // TEXT interval, validated in application code rather than a CHECK,
+      // so this stays a same-table ALTER — no rebuild needed this time).
+      sql.exec(`
+        ALTER TABLE tasks ADD COLUMN parent_task_id TEXT;
+        ALTER TABLE tasks ADD COLUMN recurrence TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+      `);
+      sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (4, ?)", new Date().toISOString());
+    }
   }
 
   /** The board slug this DO instance owns. Requires the DO to have been created via `getByName(slug)`. */
@@ -238,12 +252,14 @@ export class BoardDO extends DurableObject<Env> {
       version: 0,
       needs_human: input.needsHuman ? 1 : 0,
       needs_human_reason: input.needsHuman ? (input.needsHumanReason ?? null) : null,
+      parent_task_id: input.parentTaskId ?? null,
+      recurrence: input.recurrence ?? null,
     };
 
     this.ctx.storage.sql.exec(
       `INSERT INTO tasks
-        (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, created_by, claimed_by, version, needs_human, needs_human_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, created_by, claimed_by, version, needs_human, needs_human_reason, parent_task_id, recurrence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.board_id,
       row.title,
@@ -260,6 +276,8 @@ export class BoardDO extends DurableObject<Env> {
       row.version,
       row.needs_human,
       row.needs_human_reason,
+      row.parent_task_id,
+      row.recurrence,
     );
 
     const task = toTask(row);
@@ -295,6 +313,10 @@ export class BoardDO extends DurableObject<Env> {
       // ordinary label text, since the label is bracketed by its own quotes.
       clauses.push("labels LIKE ?");
       params.push(`%"${filter.label}"%`);
+    }
+    if (filter.parentTaskId) {
+      clauses.push("parent_task_id = ?");
+      params.push(filter.parentTaskId);
     }
 
     const rows = this.ctx.storage.sql
@@ -333,13 +355,15 @@ export class BoardDO extends DurableObject<Env> {
       needs_human: patch.needsHuman !== undefined ? (patch.needsHuman ? 1 : 0) : existing.needs_human,
       needs_human_reason:
         patch.needsHumanReason !== undefined ? patch.needsHumanReason : existing.needs_human_reason,
+      parent_task_id: patch.parentTaskId !== undefined ? patch.parentTaskId : existing.parent_task_id,
+      recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
     };
 
     this.ctx.storage.sql.exec(
       `UPDATE tasks SET
         title = ?, description = ?, status = ?, priority = ?, assignee = ?,
         labels = ?, due_date = ?, claimed_by = ?, updated_at = ?, version = ?,
-        needs_human = ?, needs_human_reason = ?
+        needs_human = ?, needs_human_reason = ?, parent_task_id = ?, recurrence = ?
        WHERE id = ?`,
       next.title,
       next.description,
@@ -353,6 +377,8 @@ export class BoardDO extends DurableObject<Env> {
       next.version,
       next.needs_human,
       next.needs_human_reason,
+      next.parent_task_id,
+      next.recurrence,
       id,
     );
 
@@ -361,6 +387,24 @@ export class BoardDO extends DurableObject<Env> {
     // Only ping on the false → true transition, not on every subsequent
     // edit — otherwise re-saving an already-flagged task would re-page.
     if (task.needsHuman && existing.needs_human === 0) this.#notifyNeedsHuman(task);
+
+    // Recurrence: completing a recurring task spawns its next occurrence
+    // immediately, in the same call — no cron needed, and it's naturally
+    // race-free for the same reason claimNextTask is (single-threaded DO,
+    // no await between the completion write and this one).
+    if (task.status === "done" && existing.status !== "done" && task.recurrence) {
+      this.createTask({
+        title: task.title,
+        description: task.description ?? undefined,
+        priority: task.priority,
+        assignee: task.assignee ?? undefined,
+        labels: task.labels,
+        dueDate: advanceDate(task.dueDate, task.recurrence),
+        createdBy: task.createdBy ?? undefined,
+        recurrence: task.recurrence,
+      });
+    }
+
     return task;
   }
 
@@ -706,6 +750,8 @@ interface TaskRow extends Record<string, SqlStorageValue> {
   version: number;
   needs_human: number;
   needs_human_reason: string | null;
+  parent_task_id: string | null;
+  recurrence: string | null;
 }
 
 interface CommentRow extends Record<string, SqlStorageValue> {
@@ -736,7 +782,20 @@ function toTask(row: TaskRow): Task {
     version: row.version,
     needsHuman: row.needs_human === 1,
     needsHumanReason: row.needs_human_reason,
+    parentTaskId: row.parent_task_id,
+    recurrence: row.recurrence as RecurrenceInterval | null,
   };
+}
+
+/** Advances an ISO date string by one recurrence interval; if `from` is
+ *  null, advances from today. Used only when a "done" task has recurrence
+ *  set — see updateTask's spawn-next-occurrence block. */
+function advanceDate(from: string | null, interval: RecurrenceInterval): string {
+  const base = from ? new Date(from) : new Date();
+  if (interval === "daily") base.setUTCDate(base.getUTCDate() + 1);
+  else if (interval === "weekly") base.setUTCDate(base.getUTCDate() + 7);
+  else base.setUTCMonth(base.getUTCMonth() + 1);
+  return base.toISOString().slice(0, 10);
 }
 
 function toComment(row: CommentRow): Comment {

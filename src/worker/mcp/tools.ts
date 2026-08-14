@@ -24,6 +24,7 @@ export interface McpEnv {
 
 const priorityEnum = z.enum(["low", "normal", "high", "urgent"]);
 const statusEnum = z.enum(["planned", "open", "in_progress", "blocked", "done"]);
+const recurrenceEnum = z.enum(["daily", "weekly", "monthly"]);
 
 function ok(payload: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
@@ -71,9 +72,26 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
               "and rolls into the daily digest until a human clears it back to false.",
           ),
         needs_human_reason: z.string().optional().describe("Why you're stuck — shown in the ping."),
+        parent_task_id: z.string().optional().describe("Make this a sub-task of an existing task id."),
+        recurrence: recurrenceEnum
+          .optional()
+          .describe("If set, completing this task auto-creates its next occurrence."),
       },
     },
-    async ({ board, title, description, status, priority, assignee, labels, due_date, needs_human, needs_human_reason }) => {
+    async ({
+      board,
+      title,
+      description,
+      status,
+      priority,
+      assignee,
+      labels,
+      due_date,
+      needs_human,
+      needs_human_reason,
+      parent_task_id,
+      recurrence,
+    }) => {
       try {
         const task = await boardStub(env, board).createTask({
           title,
@@ -86,6 +104,8 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
           createdBy: actorFor(token),
           needsHuman: needs_human,
           needsHumanReason: needs_human_reason,
+          parentTaskId: parent_task_id,
+          recurrence,
         });
         return ok(task);
       } catch (e) {
@@ -137,15 +157,25 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
             "Set true when stuck and need a human decision (pings Telegram once), or false to clear/resolve it.",
           ),
         needs_human_reason: z.string().optional().describe("Why you're stuck — shown in the ping."),
+        parent_task_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Make this a sub-task of an existing task id, or null to un-parent it."),
+        recurrence: recurrenceEnum
+          .nullable()
+          .optional()
+          .describe("If set, completing this task auto-creates its next occurrence. Null clears it."),
       },
     },
-    async ({ board, task_id, due_date, needs_human, needs_human_reason, ...patch }) => {
+    async ({ board, task_id, due_date, needs_human, needs_human_reason, parent_task_id, ...patch }) => {
       try {
         const task = await boardStub(env, board).updateTask(task_id, {
           ...patch,
           dueDate: due_date,
           needsHuman: needs_human,
           needsHumanReason: needs_human_reason,
+          parentTaskId: parent_task_id,
         });
         return ok(task);
       } catch (e) {
@@ -217,11 +247,12 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         status: statusEnum.optional(),
         assignee: z.string().optional(),
         label: z.string().optional(),
+        parent_task_id: z.string().optional().describe("List only sub-tasks of this task id."),
       },
     },
-    async ({ board, ...filter }) => {
+    async ({ board, parent_task_id, ...filter }) => {
       try {
-        const tasks: Task[] = await boardStub(env, board).listTasks(filter);
+        const tasks: Task[] = await boardStub(env, board).listTasks({ ...filter, parentTaskId: parent_task_id });
         return ok(tasks);
       } catch (e) {
         return err(`list_tasks failed: ${(e as Error).message}`);

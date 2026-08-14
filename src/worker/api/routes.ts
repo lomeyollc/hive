@@ -4,6 +4,7 @@ import type {
   CreateCommentInput,
   CreateTaskInput as DoCreateTaskInput,
   ListTasksFilter,
+  RecurrenceInterval,
   Task as DoTask,
   TaskPriority,
   TaskStatus,
@@ -293,6 +294,7 @@ async function listTasks(env: Env, slug: string, params: URLSearchParams): Promi
     status: (params.get("status") as TaskStatus) ?? undefined,
     assignee: params.get("assignee") ?? undefined,
     label: params.get("label") ?? undefined,
+    parentTaskId: params.get("parent_task_id") ?? undefined,
   };
   const tasks = await env.BOARD_DO.getByName(slug).listTasks(filter);
   return json({ tasks: tasks.map(taskToWire) });
@@ -314,6 +316,8 @@ async function createTask(request: Request, env: Env, slug: string): Promise<Res
     dueDate: body.due_date ?? null,
     needsHuman: body.needs_human,
     needsHumanReason: body.needs_human_reason ?? null,
+    parentTaskId: body.parent_task_id ?? null,
+    recurrence: body.recurrence ?? null,
   };
   const task = await env.BOARD_DO.getByName(slug).createTask(input);
   return json({ task: taskToWire(task) }, 201);
@@ -331,6 +335,8 @@ async function updateTask(request: Request, env: Env, slug: string, taskId: stri
     dueDate: body.due_date,
     needsHuman: body.needs_human,
     needsHumanReason: body.needs_human_reason,
+    parentTaskId: body.parent_task_id,
+    recurrence: body.recurrence,
   };
   const task = await env.BOARD_DO.getByName(slug).updateTask(taskId, patch);
   return json({ task: taskToWire(task) });
@@ -368,6 +374,8 @@ function taskToWire(task: DoTask) {
     version: task.version,
     needs_human: task.needsHuman,
     needs_human_reason: task.needsHumanReason,
+    parent_task_id: task.parentTaskId,
+    recurrence: task.recurrence,
   };
 }
 
@@ -381,6 +389,8 @@ interface WireCreateTaskInput {
   due_date?: string;
   needs_human?: boolean;
   needs_human_reason?: string;
+  parent_task_id?: string;
+  recurrence?: RecurrenceInterval;
 }
 
 interface WireUpdateTaskInput {
@@ -393,6 +403,8 @@ interface WireUpdateTaskInput {
   due_date?: string;
   needs_human?: boolean;
   needs_human_reason?: string;
+  parent_task_id?: string | null;
+  recurrence?: RecurrenceInterval | null;
 }
 
 // ── Comments (BoardDO RPC) ────────────────────────────────────────────────

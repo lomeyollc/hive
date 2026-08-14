@@ -15,7 +15,11 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
  *                          already authenticated)
  *   /boards              - board list (protected)
  *   /boards/:slug         - board detail: tasks, create-task dialog, live
- *                          WebSocket updates, task detail panel (protected)
+ *                          WebSocket updates, kanban/list view (protected)
+ *   /boards/:slug/tasks/:taskId - same page, with that task's detail sheet
+ *                          open. The URL is the task's stable address (Rule
+ *                          38, product-rules.md) — copy-link buttons point
+ *                          here, opening it directly reproduces the sheet.
  *   /settings            - API Bearer token management (protected)
  *
  * Auth state comes from AuthProvider (src/context/auth-context.tsx), which
@@ -32,6 +36,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/boards" element={<BoardListPage />} />
             <Route path="/boards/:slug" element={<BoardDetailPage />} />
+            <Route path="/boards/:slug/tasks/:taskId" element={<BoardDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Route>

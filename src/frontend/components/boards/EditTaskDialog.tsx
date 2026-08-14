@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { updateTask } from "@/lib/api";
-import type { Task, TaskPriority } from "@/lib/types";
+import type { RecurrenceInterval, Task, TaskPriority } from "@/lib/types";
 import { PRIORITY_OPTIONS } from "@/components/boards/PriorityBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,7 @@ export function EditTaskDialog({
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
   const [needsHuman, setNeedsHuman] = useState(task.needs_human);
   const [needsHumanReason, setNeedsHumanReason] = useState(task.needs_human_reason ?? "");
+  const [recurrence, setRecurrence] = useState<RecurrenceInterval | "none">(task.recurrence ?? "none");
 
   function openWithFreshValues(next: boolean) {
     if (next) {
@@ -49,6 +50,7 @@ export function EditTaskDialog({
       setDueDate(task.due_date ?? "");
       setNeedsHuman(task.needs_human);
       setNeedsHumanReason(task.needs_human_reason ?? "");
+      setRecurrence(task.recurrence ?? "none");
     }
     setOpen(next);
   }
@@ -73,6 +75,7 @@ export function EditTaskDialog({
         due_date: dueDate,
         needs_human: needsHuman,
         needs_human_reason: needsHuman ? needsHumanReason.trim() : "",
+        recurrence: recurrence === "none" ? null : recurrence,
       });
       toast.success("Task updated");
       onUpdated(updated);
@@ -136,6 +139,26 @@ export function EditTaskDialog({
                 <Label htmlFor="edit-due">Due date</Label>
                 <Input id="edit-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
               </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-recurrence">Repeats</Label>
+              <Select value={recurrence} onValueChange={(v) => setRecurrence(v as typeof recurrence)}>
+                <SelectTrigger id="edit-recurrence">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Doesn't repeat</SelectItem>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+              {recurrence !== "none" && (
+                <p className="text-xs text-muted-foreground">
+                  Marking this task Done will automatically create the next occurrence.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">

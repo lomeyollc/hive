@@ -13,6 +13,7 @@
  */
 export type TaskStatus = "planned" | "open" | "in_progress" | "blocked" | "done";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
+export type RecurrenceInterval = "daily" | "weekly" | "monthly";
 
 /** A task as returned to callers — `labels` is a real string array, never the raw JSON TEXT column. */
 export interface Task {
@@ -38,6 +39,12 @@ export interface Task {
    */
   needsHuman: boolean;
   needsHumanReason: string | null;
+  /** Another task's id in the same board, if this is a sub-task of it. */
+  parentTaskId: string | null;
+  /** When set, completing this task (status -> "done") spawns the next
+   *  occurrence automatically — a new task with the same fields, status
+   *  "open", due_date advanced by one interval. See BoardDO.updateTask. */
+  recurrence: RecurrenceInterval | null;
 }
 
 export interface Comment {
@@ -59,6 +66,8 @@ export interface CreateTaskInput {
   createdBy?: string | null;
   needsHuman?: boolean;
   needsHumanReason?: string | null;
+  parentTaskId?: string | null;
+  recurrence?: RecurrenceInterval | null;
 }
 
 /** Partial patch — only the provided fields are changed. Every update bumps `version` and `updatedAt` regardless. */
@@ -73,6 +82,8 @@ export interface UpdateTaskInput {
   claimedBy?: string | null;
   needsHuman?: boolean;
   needsHumanReason?: string | null;
+  parentTaskId?: string | null;
+  recurrence?: RecurrenceInterval | null;
 }
 
 export interface ListTasksFilter {
@@ -80,6 +91,11 @@ export interface ListTasksFilter {
   assignee?: string;
   /** Matches tasks whose `labels` array contains this exact label. */
   label?: string;
+  /** Sub-tasks of this task id. Pass "" (empty string) to mean "top-level
+   *  only" if that filtering is ever needed server-side; today the
+   *  frontend derives sub-tasks client-side from the already-loaded list,
+   *  so this exists mainly for MCP/agent callers. */
+  parentTaskId?: string;
 }
 
 /** Filter for claim_next_task — narrows which unclaimed open task gets picked, all fields optional/AND'd. */

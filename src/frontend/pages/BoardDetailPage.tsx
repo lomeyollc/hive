@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Search } from "lucide-react";
+import { ArrowLeft, Search, LayoutGrid, List as ListIcon } from "lucide-react";
 import { toast } from "sonner";
-import { claimTask, listTasks } from "@/lib/api";
+import { claimTask, listTasks, updateTask } from "@/lib/api";
 import { useBoardSocket } from "@/hooks/use-board-socket";
 import type { Comment, Task, TaskStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateTaskDialog } from "@/components/boards/CreateTaskDialog";
 import { BoardSettingsMenu } from "@/components/boards/BoardSettingsMenu";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { TaskCard } from "@/components/boards/TaskCard";
 import { TaskDetailSheet } from "@/components/boards/TaskDetailSheet";
+import { KanbanBoard } from "@/components/boards/KanbanBoard";
 
 const TABS: { value: "all" | TaskStatus; label: string }[] = [
   { value: "all", label: "All" },
@@ -24,13 +26,16 @@ const TABS: { value: "all" | TaskStatus; label: string }[] = [
 ];
 
 export function BoardDetailPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, taskId } = useParams<{ slug: string; taskId?: string }>();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | TaskStatus>("all");
   const [search, setSearch] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [view, setView] = useState<"board" | "list">("board");
+  // The open task IS the URL (Rule 38) — taskId comes from the route, not
+  // local state, so copying the URL or reloading reproduces the same sheet.
+  const selectedTaskId = taskId ?? null;
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [liveComments, setLiveComments] = useState<Comment[]>([]);
 
@@ -91,17 +96,21 @@ export function BoardDetailPage() {
     return base;
   }, [tasks]);
 
-  const visibleTasks = useMemo(() => {
+  const searchedTasks = useMemo(() => {
     if (!tasks) return [];
-    let result = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
     const q = search.trim().toLowerCase();
-    if (q) {
-      result = result.filter(
-        (t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q),
-      );
-    }
-    return result;
-  }, [tasks, filter, search]);
+    if (!q) return tasks;
+    return tasks.filter(
+      (t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q),
+    );
+  }, [tasks, search]);
+
+  // List view respects both the status tab and search; the board view shows
+  // every status as its own column, so only search narrows it.
+  const visibleTasks = useMemo(
+    () => (filter === "all" ? searchedTasks : searchedTasks.filter((t) => t.status === filter)),
+    [searchedTasks, filter],
+  );
 
   const selectedTask = tasks?.find((t) => t.id === selectedTaskId) ?? null;
 
@@ -116,6 +125,19 @@ export function BoardDetailPage() {
       toast.error(err instanceof Error ? err.message : "Failed to claim task");
     } finally {
       setClaimingId(null);
+    }
+  }
+
+  async function handleMove(task: Task, status: TaskStatus) {
+    if (!slug) return;
+    const previous = task.status;
+    upsertTask({ ...task, status }); // optimistic — Rule 7
+    try {
+      const updated = await updateTask(slug, task.id, { status });
+      upsertTask(updated);
+    } catch (err) {
+      upsertTask({ ...task, status: previous }); // roll back on failure
+      toast.error(err instanceof Error ? err.message : "Failed to move task");
     }
   }
 
@@ -136,33 +158,62 @@ export function BoardDetailPage() {
               {tasks ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "Loading…"}
             </p>
           </div>
+          <CopyLinkButton path={`/boards/${slug}`} />
           <BoardSettingsMenu slug={slug} onDeleted={() => navigate("/boards")} />
         </div>
         <CreateTaskDialog boardSlug={slug} onCreated={upsertTask} />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-          <TabsList>
-            {TABS.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>
-                {tab.label}
-                {tab.value !== "all" && counts[tab.value] > 0 && (
-                  <span className="ml-1.5 text-xs text-muted-foreground">{counts[tab.value]}</span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {view === "list" ? (
+          <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+            <TabsList>
+              {TABS.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {tab.label}
+                  {tab.value !== "all" && counts[tab.value] > 0 && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">{counts[tab.value]}</span>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : (
+          <div />
+        )}
 
-        <div className="relative w-full max-w-[220px]">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tasks…"
-            className="h-8 pl-8 text-sm"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative w-full max-w-[220px]">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search tasks…"
+              className="h-8 pl-8 text-sm"
+            />
+          </div>
+
+          {/* Two fixed options -> segmented control, not a dropdown (Rule 37). */}
+          <div className="flex rounded-md border p-0.5">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={view === "board" ? "secondary" : "ghost"}
+              onClick={() => setView("board")}
+              title="Board view"
+            >
+              <LayoutGrid className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={view === "list" ? "secondary" : "ghost"}
+              onClick={() => setView("list")}
+              title="List view"
+            >
+              <ListIcon className="size-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -180,17 +231,25 @@ export function BoardDetailPage() {
         </div>
       )}
 
-      {tasks && visibleTasks.length === 0 && (
+      {tasks && view === "board" && (
+        <KanbanBoard
+          tasks={searchedTasks}
+          onOpen={(t) => navigate(`/boards/${slug}/tasks/${t.id}`)}
+          onMove={handleMove}
+        />
+      )}
+
+      {tasks && view === "list" && visibleTasks.length === 0 && (
         <p className="text-sm text-muted-foreground">No tasks here yet.</p>
       )}
 
-      {tasks && visibleTasks.length > 0 && (
+      {tasks && view === "list" && visibleTasks.length > 0 && (
         <div className="flex flex-col gap-2">
           {visibleTasks.map((task) => (
             <TaskCard
               key={task.id}
               task={task}
-              onOpen={(t) => setSelectedTaskId(t.id)}
+              onOpen={(t) => navigate(`/boards/${slug}/tasks/${t.id}`)}
               onClaim={handleClaim}
               claiming={claimingId === task.id}
             />
@@ -201,11 +260,13 @@ export function BoardDetailPage() {
       <TaskDetailSheet
         boardSlug={slug}
         task={selectedTask}
-        onOpenChange={(open) => !open && setSelectedTaskId(null)}
+        allTasks={tasks ?? []}
+        onOpenTask={(id) => navigate(`/boards/${slug}/tasks/${id}`)}
+        onOpenChange={(open) => !open && navigate(`/boards/${slug}`)}
         onTaskUpdated={upsertTask}
-        onTaskDeleted={(taskId) => {
-          setTasks((prev) => prev?.filter((t) => t.id !== taskId) ?? prev);
-          setSelectedTaskId(null);
+        onTaskDeleted={(deletedTaskId) => {
+          setTasks((prev) => prev?.filter((t) => t.id !== deletedTaskId) ?? prev);
+          navigate(`/boards/${slug}`);
         }}
         liveComments={liveComments}
       />

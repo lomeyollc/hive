@@ -46,6 +46,7 @@ import type {
   Comment,
   CreatedApiToken,
   CurrentUser,
+  RecurrenceInterval,
   Task,
   TaskPriority,
   TaskStatus,
@@ -207,6 +208,8 @@ export interface CreateTaskInput {
   due_date?: string;
   needs_human?: boolean;
   needs_human_reason?: string;
+  parent_task_id?: string;
+  recurrence?: RecurrenceInterval;
 }
 
 export async function createTask(slug: string, input: CreateTaskInput): Promise<Task> {
@@ -232,6 +235,8 @@ export async function updateTask(
       | "due_date"
       | "needs_human"
       | "needs_human_reason"
+      | "parent_task_id"
+      | "recurrence"
     >
   >,
 ): Promise<Task> {

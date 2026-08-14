@@ -16,6 +16,9 @@
     "d1:migrate:remote": "wrangler d1 migrations apply hive --remote"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.8.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "class-variance-authority": "^0.7.1",

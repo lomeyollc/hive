@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { claimTask, createComment, deleteTask, listComments, updateTask } from "@/lib/api";
+import { claimTask, createComment, createTask, deleteTask, listComments, updateTask } from "@/lib/api";
 import type { Comment, Task } from "@/lib/types";
 import { STATUS_OPTIONS, StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
@@ -14,11 +14,15 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hand, Trash2, AlertTriangle, Check } from "lucide-react";
+import { Hand, Trash2, AlertTriangle, Check, CornerDownRight, Repeat, Plus, ArrowUpRight } from "lucide-react";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
+
+const RECURRENCE_LABEL: Record<string, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 
 function formatDateTime(iso: string) {
   try {
@@ -31,6 +35,8 @@ function formatDateTime(iso: string) {
 export function TaskDetailSheet({
   boardSlug,
   task,
+  allTasks,
+  onOpenTask,
   onOpenChange,
   onTaskUpdated,
   onTaskDeleted,
@@ -39,6 +45,10 @@ export function TaskDetailSheet({
 }: {
   boardSlug: string;
   task: Task | null;
+  /** Every task currently loaded for this board — used only to derive
+   *  sub-tasks/parent client-side; no extra fetch needed. */
+  allTasks: Task[];
+  onOpenTask: (taskId: string) => void;
   onOpenChange: (open: boolean) => void;
   onTaskUpdated: (task: Task) => void;
   onTaskDeleted: (taskId: string) => void;
@@ -50,6 +60,8 @@ export function TaskDetailSheet({
   const [claiming, setClaiming] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [addingSubtask, setAddingSubtask] = useState(false);
 
   useEffect(() => {
     if (!task) {
@@ -90,6 +102,23 @@ export function TaskDetailSheet({
         <SheetContent />
       </Sheet>
     );
+  }
+
+  const parentTask = task.parent_task_id ? (allTasks.find((t) => t.id === task.parent_task_id) ?? null) : null;
+  const subtasks = allTasks.filter((t) => t.parent_task_id === task.id);
+
+  async function handleAddSubtask() {
+    if (!task || !subtaskTitle.trim()) return;
+    setAddingSubtask(true);
+    try {
+      const created = await createTask(boardSlug, { title: subtaskTitle.trim(), parent_task_id: task.id });
+      onTaskUpdated(created);
+      setSubtaskTitle("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add sub-task");
+    } finally {
+      setAddingSubtask(false);
+    }
   }
 
   async function handlePostComment() {
@@ -164,8 +193,27 @@ export function TaskDetailSheet({
     <Sheet open={task !== null} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col gap-0 sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle className="pr-8">{task.title}</SheetTitle>
+          <div className="flex items-start gap-1 pr-6">
+            <SheetTitle className="flex-1">{task.title}</SheetTitle>
+            <CopyLinkButton path={`/boards/${boardSlug}/tasks/${task.id}`} className="mt-0.5" />
+          </div>
           {task.description && <SheetDescription>{task.description}</SheetDescription>}
+          {parentTask && (
+            <button
+              type="button"
+              onClick={() => onOpenTask(parentTask.id)}
+              className="flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <CornerDownRight className="size-3" />
+              Part of: {parentTask.title}
+            </button>
+          )}
+          {task.recurrence && (
+            <span className="flex w-fit items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+              <Repeat className="size-3" />
+              Repeats {RECURRENCE_LABEL[task.recurrence]}
+            </span>
+          )}
         </SheetHeader>
 
         <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-4">
@@ -281,6 +329,43 @@ export function TaskDetailSheet({
               {claiming ? "Claiming…" : "Claim this task"}
             </Button>
           )}
+
+          <Separator />
+
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">Sub-tasks{subtasks.length > 0 ? ` (${subtasks.length})` : ""}</p>
+            {subtasks.map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => onOpenTask(sub.id)}
+                className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm hover:bg-muted/50"
+              >
+                <span className="flex items-center gap-1.5 truncate">
+                  <StatusBadge status={sub.status} className="shrink-0" />
+                  <span className="truncate">{sub.title}</span>
+                </span>
+                <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
+            <div className="flex gap-1.5">
+              <Input
+                value={subtaskTitle}
+                onChange={(e) => setSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddSubtask()}
+                placeholder="Add a sub-task…"
+                className="h-8 text-sm"
+              />
+              <Button
+                size="icon-sm"
+                variant="outline"
+                disabled={addingSubtask || !subtaskTitle.trim()}
+                onClick={handleAddSubtask}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            </div>
+          </div>
 
           <Separator />
 

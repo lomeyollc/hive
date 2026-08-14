@@ -7,6 +7,7 @@
  */
 
 export type TaskStatus = "planned" | "open" | "in_progress" | "blocked" | "done";
+export type RecurrenceInterval = "daily" | "weekly" | "monthly";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 export interface Task {
@@ -26,6 +27,8 @@ export interface Task {
   version: number;
   needs_human: boolean;
   needs_human_reason: string | null;
+  parent_task_id: string | null;
+  recurrence: RecurrenceInterval | null;
 }
 
 export interface Comment {
