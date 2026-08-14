@@ -40,7 +40,14 @@ export function LoginPage() {
           </ul>
         </div>
 
-        <p className="text-xs text-neutral-600">Open source · github.com/lomeyollc/hive</p>
+        <a
+          href="https://github.com/lomeyollc/hive"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-neutral-600 hover:text-neutral-300"
+        >
+          Open source · github.com/lomeyollc/hive
+        </a>
       </div>
 
       <div className="flex flex-col items-center justify-center gap-6 px-6 py-16">
@@ -59,6 +66,15 @@ export function LoginPage() {
         </div>
 
         <GoogleSignInButton />
+
+        <a
+          href="https://github.com/lomeyollc/hive"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-muted-foreground hover:text-foreground lg:hidden"
+        >
+          Open source · github.com/lomeyollc/hive
+        </a>
       </div>
     </div>
   );

@@ -304,6 +304,14 @@ export async function createWorkspace(input: { id: string; name: string }): Prom
   return data.workspace;
 }
 
+export async function updateWorkspace(id: string, patch: { name: string }): Promise<Workspace> {
+  const data = await request<{ workspace: Workspace }>(`/api/workspaces/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return data.workspace;
+}
+
 export async function listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
   const data = await request<{ members: WorkspaceMember[] }>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/members`,

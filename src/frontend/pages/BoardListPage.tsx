@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { listBoards, listWorkspaces } from "@/lib/api";
-import type { Board, Workspace } from "@/lib/types";
+import { listBoards } from "@/lib/api";
+import type { Board } from "@/lib/types";
+import { useWorkspace } from "@/context/workspace-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,17 +16,15 @@ import type { TaskStatus } from "@/lib/types";
 const COUNT_STATUSES: TaskStatus[] = ["open", "in_progress", "blocked", "done"];
 
 export function BoardListPage() {
+  const { workspaces, current: workspace, refresh: refreshWorkspaces } = useWorkspace();
   const [boards, setBoards] = useState<Board[] | null>(null);
-  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listBoards(), listWorkspaces()])
-      .then(([boardData, workspaceData]) => {
-        if (cancelled) return;
-        setBoards(boardData);
-        setWorkspaces(workspaceData);
+    listBoards()
+      .then((boardData) => {
+        if (!cancelled) setBoards(boardData);
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "Failed to load boards";
@@ -36,11 +35,6 @@ export function BoardListPage() {
       cancelled = true;
     };
   }, []);
-
-  // Single-workspace assumption for v1 — the UI doesn't have a workspace
-  // switcher yet. Multiple workspaces work at the data/API level already
-  // (see routes.ts); this just always targets the first one.
-  const workspace = workspaces?.[0] ?? null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -88,7 +82,7 @@ export function BoardListPage() {
           <p className="text-sm text-muted-foreground">
             No workspace yet. A workspace is where your boards and teammates live.
           </p>
-          <CreateWorkspaceDialog onCreated={(ws) => setWorkspaces([ws])} />
+          <CreateWorkspaceDialog onCreated={() => void refreshWorkspaces()} />
         </div>
       )}
 

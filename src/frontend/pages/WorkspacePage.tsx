@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { listMembers, listWorkspaces } from "@/lib/api";
-import type { Workspace, WorkspaceMember } from "@/lib/types";
+import { listMembers, updateWorkspace } from "@/lib/api";
+import type { WorkspaceMember } from "@/lib/types";
+import { useWorkspace } from "@/context/workspace-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { InviteMemberDialog } from "@/components/workspace/InviteMemberDialog";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { Pencil, Check, X } from "lucide-react";
 
 function formatDate(iso: string) {
   try {
@@ -16,20 +20,83 @@ function formatDate(iso: string) {
   }
 }
 
+function WorkspaceName({ id, name, onRenamed }: { id: string; name: string; onRenamed: (name: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(name);
+  const [saving, setSaving] = useState(false);
+
+  if (!editing) {
+    return (
+      <div className="group flex items-center gap-2">
+        <h1 className="text-2xl font-semibold">{name}</h1>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 opacity-0 group-hover:opacity-100"
+          onClick={() => {
+            setValue(name);
+            setEditing(true);
+          }}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  async function save() {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === name) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateWorkspace(id, { name: trimmed });
+      onRenamed(trimmed);
+      toast.success("Workspace renamed");
+      setEditing(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to rename workspace");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void save();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="h-9 max-w-xs text-2xl font-semibold"
+        disabled={saving}
+      />
+      <Button variant="ghost" size="icon" className="size-7" onClick={() => void save()} disabled={saving}>
+        <Check className="size-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="size-7" onClick={() => setEditing(false)} disabled={saving}>
+        <X className="size-4" />
+      </Button>
+    </div>
+  );
+}
+
 export function WorkspacePage() {
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const { current, refresh } = useWorkspace();
   const [members, setMembers] = useState<WorkspaceMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!current) return;
     let cancelled = false;
-    listWorkspaces()
-      .then(async (workspaces) => {
-        const ws = workspaces[0] ?? null;
-        if (cancelled) return;
-        setWorkspace(ws);
-        if (!ws) return setMembers([]);
-        const memberData = await listMembers(ws.id);
+    setMembers(null);
+    listMembers(current.id)
+      .then((memberData) => {
         if (!cancelled) setMembers(memberData);
       })
       .catch((err: unknown) => {
@@ -40,7 +107,7 @@ export function WorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [current]);
 
   if (error) {
     return (
@@ -50,15 +117,15 @@ export function WorkspacePage() {
     );
   }
 
-  if (!workspace) {
+  if (!current) {
     return <Skeleton className="h-40 w-full rounded-xl" />;
   }
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold">{workspace.name}</h1>
-        <p className="text-sm text-muted-foreground">Workspace id: {workspace.id}</p>
+        <WorkspaceName id={current.id} name={current.name} onRenamed={() => void refresh()} />
+        <p className="text-sm text-muted-foreground">Workspace id: {current.id}</p>
       </div>
 
       <Card>
@@ -70,7 +137,7 @@ export function WorkspacePage() {
             </CardDescription>
           </div>
           <InviteMemberDialog
-            workspaceId={workspace.id}
+            workspaceId={current.id}
             onInvited={(member) => setMembers((prev) => [...(prev ?? []), member])}
           />
         </CardHeader>

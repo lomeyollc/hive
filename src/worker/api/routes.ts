@@ -51,6 +51,7 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *          Only workspaces the caller is an ACTIVE member of.
  *   POST   /api/workspaces        { id, name }    -> { workspace } (201)
  *          Creator becomes an active 'owner' member automatically.
+ *   PATCH  /api/workspaces/:id    { name }        -> { workspace }
  *   GET    /api/workspaces/:id/members            -> { members: Member[] }
  *   POST   /api/workspaces/:id/invites { email }   -> { invite_url } (201)
  *          Creates an 'invited' member row + token. No email is sent — the
@@ -136,6 +137,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     if (parts.length === 2 && parts[1] === "workspaces") {
       if (request.method === "GET") return await listWorkspaces(env, session.email);
       if (request.method === "POST") return await createWorkspace(request, env, session.email);
+    }
+
+    // /api/workspaces/:id
+    if (parts.length === 3 && parts[1] === "workspaces" && request.method === "PATCH") {
+      return await updateWorkspace(request, env, parts[2], session.email);
     }
 
     // /api/workspaces/:id/members
@@ -392,6 +398,24 @@ async function createWorkspace(request: Request, env: Env, email: string): Promi
   }
 
   return json({ workspace: { id, name, created_at: now } }, 201);
+}
+
+async function updateWorkspace(request: Request, env: Env, workspaceId: string, email: string): Promise<Response> {
+  if (!(await isActiveMember(env, workspaceId, email))) {
+    throw new NotFoundError(`workspace "${workspaceId}" not found`);
+  }
+  const body = await readJson<{ name?: string }>(request);
+  const name = body.name?.trim();
+  if (!name) {
+    throw new ValidationError("name is required");
+  }
+
+  await env.DB.prepare(`UPDATE workspaces SET name = ? WHERE id = ?`).bind(name, workspaceId).run();
+
+  const row = await env.DB.prepare(`SELECT id, name, created_at FROM workspaces WHERE id = ?`)
+    .bind(workspaceId)
+    .first<WorkspaceRow>();
+  return json({ workspace: row });
 }
 
 async function listMembers(env: Env, workspaceId: string, email: string): Promise<Response> {

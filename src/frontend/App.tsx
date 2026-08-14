@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/context/auth-context";
+import { WorkspaceProvider } from "@/context/workspace-context";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/pages/LoginPage";
@@ -46,7 +47,13 @@ export default function App() {
         <Route path="/invites/:token" element={<AcceptInvitePage />} />
 
         <Route element={<ProtectedRoute />}>
-          <Route element={<AppShell />}>
+          <Route
+            element={
+              <WorkspaceProvider>
+                <AppShell />
+              </WorkspaceProvider>
+            }
+          >
             <Route path="/boards" element={<BoardListPage />} />
             <Route path="/boards/:slug" element={<BoardDetailPage />} />
             <Route path="/boards/:slug/tasks/:taskId" element={<BoardDetailPage />} />

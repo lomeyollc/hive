@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { NeedsHumanBadge } from "@/components/layout/NeedsHumanBadge";
+import { WorkspaceSwitcher } from "@/components/workspace/WorkspaceSwitcher";
 
 function initials(email: string) {
   return email.slice(0, 2).toUpperCase();
@@ -24,11 +25,15 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-          <Link to="/boards" className="flex items-center gap-2 font-semibold">
-            <HiveLogo className="size-5" />
-            Hive
-          </Link>
+        <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <Link to="/boards" className="flex items-center gap-2 font-semibold">
+              <HiveLogo className="size-5" />
+              Hive
+            </Link>
+            <span className="h-5 w-px bg-border" />
+            <WorkspaceSwitcher />
+          </div>
 
           <nav className="flex items-center gap-1">
             <NavLink
@@ -40,6 +45,17 @@ export function AppShell() {
               }
             >
               Boards
+            </NavLink>
+
+            <NavLink
+              to="/workspace"
+              className={({ isActive }) =>
+                `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                }`
+              }
+            >
+              Workspace
             </NavLink>
 
             <NavLink
@@ -87,7 +103,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-8">
         <Outlet />
       </main>
     </div>
