@@ -160,6 +160,42 @@ export class BoardDO extends DurableObject<Env> {
       `);
       sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (2, ?)", new Date().toISOString());
     }
+
+    if (version < 3) {
+      // Adds the "planned" status (the Backlog concept — a task triaged
+      // but not yet active). SQLite can't ALTER a CHECK constraint in
+      // place, so this rebuilds the table: new table with the widened
+      // constraint, copy rows, drop old, rename. Standard SQLite pattern
+      // for a constraint change; safe here because BoardDO only ever runs
+      // this from the constructor inside blockConcurrencyWhile.
+      sql.exec(`
+        CREATE TABLE tasks_v3 (
+          id TEXT PRIMARY KEY,
+          board_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('planned','open','in_progress','blocked','done')),
+          priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','urgent')),
+          assignee TEXT,
+          labels TEXT,
+          due_date TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by TEXT,
+          claimed_by TEXT,
+          version INTEGER NOT NULL DEFAULT 0,
+          needs_human INTEGER NOT NULL DEFAULT 0,
+          needs_human_reason TEXT
+        );
+        INSERT INTO tasks_v3 SELECT * FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_v3 RENAME TO tasks;
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
+        CREATE INDEX IF NOT EXISTS idx_tasks_needs_human ON tasks(needs_human);
+      `);
+      sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (3, ?)", new Date().toISOString());
+    }
   }
 
   /** The board slug this DO instance owns. Requires the DO to have been created via `getByName(slug)`. */

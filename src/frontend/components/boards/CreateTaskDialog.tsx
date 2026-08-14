@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { createTask } from "@/lib/api";
-import type { Task, TaskPriority } from "@/lib/types";
+import type { Task, TaskPriority, TaskStatus } from "@/lib/types";
 import { PRIORITY_OPTIONS } from "@/components/boards/PriorityBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +30,7 @@ export function CreateTaskDialog({
   const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [status, setStatus] = useState<TaskStatus>("open");
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [assignee, setAssignee] = useState("");
   const [labels, setLabels] = useState("");
@@ -40,6 +41,7 @@ export function CreateTaskDialog({
   function reset() {
     setTitle("");
     setDescription("");
+    setStatus("open");
     setPriority("normal");
     setAssignee("");
     setLabels("");
@@ -59,6 +61,7 @@ export function CreateTaskDialog({
       const task = await createTask(boardSlug, {
         title: title.trim(),
         description: description.trim() || undefined,
+        status,
         priority,
         assignee: assignee.trim() || undefined,
         labels: labels
@@ -120,6 +123,19 @@ export function CreateTaskDialog({
             </div>
 
             <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-status">Status</Label>
+                <Select value={status} onValueChange={(v) => setStatus(v as TaskStatus)}>
+                  <SelectTrigger id="task-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="planned">Backlog</SelectItem>
+                    <SelectItem value="open">Open</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="task-priority">Priority</Label>
                 <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>

@@ -4,7 +4,14 @@
  * or indirectly over the DO's fetch() routes).
  */
 
-export type TaskStatus = "open" | "in_progress" | "blocked" | "done";
+/**
+ * "planned" is the Backlog concept: a task that's been triaged (title,
+ * priority, maybe owner/labels/due date set) but not yet pulled into
+ * active work. It's a status value, not a board — Hive doesn't have
+ * draggable board columns, so the status tabs already serve as the
+ * board/view distinction other tools express separately.
+ */
+export type TaskStatus = "planned" | "open" | "in_progress" | "blocked" | "done";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 /** A task as returned to callers — `labels` is a real string array, never the raw JSON TEXT column. */

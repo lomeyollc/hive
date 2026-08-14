@@ -200,6 +200,7 @@ export async function listTasks(slug: string, filters: TaskFilters = {}): Promis
 export interface CreateTaskInput {
   title: string;
   description?: string;
+  status?: TaskStatus;
   priority?: TaskPriority;
   assignee?: string;
   labels?: string[];

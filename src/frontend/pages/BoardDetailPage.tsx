@@ -16,6 +16,7 @@ import { TaskDetailSheet } from "@/components/boards/TaskDetailSheet";
 
 const TABS: { value: "all" | TaskStatus; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "planned", label: "Backlog" },
   { value: "open", label: "Open" },
   { value: "in_progress", label: "In progress" },
   { value: "blocked", label: "Blocked" },
@@ -85,7 +86,7 @@ export function BoardDetailPage() {
   );
 
   const counts = useMemo(() => {
-    const base: Record<TaskStatus, number> = { open: 0, in_progress: 0, blocked: 0, done: 0 };
+    const base: Record<TaskStatus, number> = { planned: 0, open: 0, in_progress: 0, blocked: 0, done: 0 };
     for (const t of tasks ?? []) base[t.status] += 1;
     return base;
   }, [tasks]);

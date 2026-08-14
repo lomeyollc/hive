@@ -252,6 +252,29 @@ export function TaskDetailSheet({
             </div>
           </div>
 
+          {task.status === "planned" && (
+            <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+              <p className="mb-1.5 text-xs font-medium text-muted-foreground">Ready to move out of Backlog?</p>
+              <ul className="space-y-1 text-xs">
+                <li className={task.assignee ? "text-foreground" : "text-muted-foreground"}>
+                  {task.assignee ? "✓" : "○"} Owner assigned
+                </li>
+                <li className={task.labels.length > 0 ? "text-foreground" : "text-muted-foreground"}>
+                  {task.labels.length > 0 ? "✓" : "○"} Labels set
+                </li>
+                <li className="text-foreground">✓ Priority set ({task.priority})</li>
+              </ul>
+              <Button
+                size="sm"
+                className="mt-2 w-fit"
+                disabled={updatingStatus}
+                onClick={() => handleStatusChange("open")}
+              >
+                Move to Open
+              </Button>
+            </div>
+          )}
+
           {!task.claimed_by && (
             <Button size="sm" variant="outline" className="w-fit gap-1.5" disabled={claiming} onClick={handleClaim}>
               <Hand className="size-3.5" />

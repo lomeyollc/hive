@@ -6,7 +6,7 @@
  * backend agent's response shapes differ.
  */
 
-export type TaskStatus = "open" | "in_progress" | "blocked" | "done";
+export type TaskStatus = "planned" | "open" | "in_progress" | "blocked" | "done";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 export interface Task {
@@ -37,6 +37,7 @@ export interface Comment {
 }
 
 export interface TaskCounts {
+  planned: number;
   open: number;
   in_progress: number;
   blocked: number;

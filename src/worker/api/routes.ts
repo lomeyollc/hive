@@ -173,7 +173,7 @@ async function listBoards(env: Env): Promise<Response> {
 
   const countsByBoard = new Map<string, Record<TaskStatus, number>>();
   for (const row of countRows ?? []) {
-    const counts = countsByBoard.get(row.board_id) ?? { open: 0, in_progress: 0, blocked: 0, done: 0 };
+    const counts = countsByBoard.get(row.board_id) ?? { planned: 0, open: 0, in_progress: 0, blocked: 0, done: 0 };
     counts[row.status] = row.count;
     countsByBoard.set(row.board_id, counts);
   }
@@ -196,7 +196,7 @@ async function getBoard(env: Env, slug: string): Promise<Response> {
     .bind(slug)
     .all<{ status: TaskStatus; count: number }>();
 
-  const counts: Record<TaskStatus, number> = { open: 0, in_progress: 0, blocked: 0, done: 0 };
+  const counts: Record<TaskStatus, number> = { planned: 0, open: 0, in_progress: 0, blocked: 0, done: 0 };
   for (const row2 of countRows ?? []) counts[row2.status] = row2.count;
 
   return json({ board: boardToWire(row, counts) });
@@ -307,6 +307,7 @@ async function createTask(request: Request, env: Env, slug: string): Promise<Res
   const input: DoCreateTaskInput = {
     title: body.title,
     description: body.description ?? null,
+    status: body.status,
     priority: body.priority,
     assignee: body.assignee ?? null,
     labels: body.labels,
@@ -373,6 +374,7 @@ function taskToWire(task: DoTask) {
 interface WireCreateTaskInput {
   title: string;
   description?: string;
+  status?: TaskStatus;
   priority?: TaskPriority;
   assignee?: string;
   labels?: string[];

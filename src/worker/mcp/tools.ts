@@ -23,7 +23,7 @@ export interface McpEnv {
 }
 
 const priorityEnum = z.enum(["low", "normal", "high", "urgent"]);
-const statusEnum = z.enum(["open", "in_progress", "blocked", "done"]);
+const statusEnum = z.enum(["planned", "open", "in_progress", "blocked", "done"]);
 
 function ok(payload: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
@@ -58,6 +58,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         board: z.string().describe("Board slug, e.g. \"engineering\""),
         title: z.string().min(1).describe("Task title"),
         description: z.string().optional(),
+        status: statusEnum.optional().describe("Defaults to \"open\". Use \"planned\" to file straight into the Backlog."),
         priority: priorityEnum.optional().describe("Defaults to \"normal\""),
         assignee: z.string().optional(),
         labels: z.array(z.string()).optional(),
@@ -72,11 +73,12 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
         needs_human_reason: z.string().optional().describe("Why you're stuck — shown in the ping."),
       },
     },
-    async ({ board, title, description, priority, assignee, labels, due_date, needs_human, needs_human_reason }) => {
+    async ({ board, title, description, status, priority, assignee, labels, due_date, needs_human, needs_human_reason }) => {
       try {
         const task = await boardStub(env, board).createTask({
           title,
           description,
+          status,
           priority,
           assignee,
           labels,
