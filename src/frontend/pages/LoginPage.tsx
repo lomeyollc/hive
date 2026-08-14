@@ -40,14 +40,15 @@ export function LoginPage() {
           </ul>
         </div>
 
-        <a
-          href="https://github.com/lomeyollc/hive"
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-neutral-600 hover:text-neutral-300"
-        >
-          Open source · github.com/lomeyollc/hive
-        </a>
+        <div className="flex items-center gap-3 text-xs text-neutral-600">
+          <a href="https://github.com/lomeyollc/hive" target="_blank" rel="noreferrer" className="hover:text-neutral-300">
+            Open source · github.com/lomeyollc/hive
+          </a>
+          <span>·</span>
+          <a href="/docs" target="_blank" rel="noreferrer" className="hover:text-neutral-300">
+            Docs
+          </a>
+        </div>
       </div>
 
       <div className="flex flex-col items-center justify-center gap-6 px-6 py-16">
@@ -67,14 +68,15 @@ export function LoginPage() {
 
         <GoogleSignInButton />
 
-        <a
-          href="https://github.com/lomeyollc/hive"
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-muted-foreground hover:text-foreground lg:hidden"
-        >
-          Open source · github.com/lomeyollc/hive
-        </a>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground lg:hidden">
+          <a href="https://github.com/lomeyollc/hive" target="_blank" rel="noreferrer" className="hover:text-foreground">
+            Open source · github.com/lomeyollc/hive
+          </a>
+          <span>·</span>
+          <a href="/docs" target="_blank" rel="noreferrer" className="hover:text-foreground">
+            Docs
+          </a>
+        </div>
       </div>
     </div>
   );

@@ -5,6 +5,9 @@
 Hive is an open-source, AI-agent-native task/project manager. Built so a
 human and a fleet of AI agents can share one live board without colliding.
 
+**Live:** [hive.lomeyo.com](https://hive.lomeyo.com) · **Docs (MCP + REST
+API + self-host):** [hive.lomeyo.com/docs](https://hive.lomeyo.com/docs)
+
 Every board is a single Cloudflare Durable Object. A DO is single-threaded
 per instance, so every write — whether it comes from you or from ten agents
 at once — is serialized for free. No locking code, no lost updates, no

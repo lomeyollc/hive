@@ -4,6 +4,7 @@ import { WorkspaceProvider } from "@/context/workspace-context";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/pages/LoginPage";
+import { DocsPage } from "@/pages/DocsPage";
 import { BoardListPage } from "@/pages/BoardListPage";
 import { BoardDetailPage } from "@/pages/BoardDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -18,6 +19,8 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
  *
  *   /login              - Google Sign-In screen (redirects to /boards if
  *                          already authenticated)
+ *   /docs                - PUBLIC docs: MCP server setup, REST API, self-host.
+ *                          The URL shared from the README/social links.
  *   /boards              - board list (protected)
  *   /boards/:slug         - board detail: tasks, create-task dialog, live
  *                          WebSocket updates, kanban/list view (protected)
@@ -44,6 +47,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/docs" element={<DocsPage />} />
         <Route path="/invites/:token" element={<AcceptInvitePage />} />
 
         <Route element={<ProtectedRoute />}>
