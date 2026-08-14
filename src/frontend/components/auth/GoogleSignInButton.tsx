@@ -5,15 +5,14 @@ import { toast } from "sonner";
 /**
  * Google Identity Services (GIS) "Sign in with Google" button.
  *
- * Needs the OAuth Client ID (public, not the secret) available to the
- * frontend build as `VITE_GOOGLE_CLIENT_ID` — this is a Vite env var, not
- * the `GOOGLE_CLIENT_ID` Worker secret (that one only exists server-side,
- * for verifying the token). Set it in `.dev.vars`/`.env.local` for `vite
- * dev`, or as a build-time env var for `vite build`/deploy.
- *
- * TODO(integration): confirm the exact field name the /auth/google/callback
- * route expects — GIS's callback gives us `credential`, and lib/api.ts's
- * signInWithGoogle() currently posts `{ credential }`.
+ * Fetches the OAuth Client ID (public, not the secret) from GET
+ * /auth/config at runtime, which reads the Worker's GOOGLE_CLIENT_ID env
+ * var server-side. This is deliberately NOT a frontend build-time env var
+ * (e.g. VITE_GOOGLE_CLIENT_ID) — a self-hoster only has to run one
+ * `wrangler secret put GOOGLE_CLIENT_ID` and the already-built static
+ * assets pick it up immediately, no rebuild required. A Client ID is safe
+ * to expose this way; it's the same value every Google Sign-In button on
+ * the web embeds client-side.
  */
 declare global {
   interface Window {
@@ -58,11 +57,35 @@ export function GoogleSignInButton() {
   const { signInWithGoogle } = useAuth();
   const buttonRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    fetch("/auth/config")
+      .then((res) => res.json() as Promise<{ googleClientId: string | null }>)
+      .then((data) => {
+        if (cancelled) return;
+        setClientId(data.googleClientId);
+        setConfigLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("Could not reach /auth/config to load the Google Client ID.");
+          setConfigLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!configLoaded) return;
     if (!clientId) {
-      setError("VITE_GOOGLE_CLIENT_ID is not set — see .dev.vars.example.");
+      setError(
+        "Google sign-in isn't configured yet. Set GOOGLE_CLIENT_ID with `wrangler secret put GOOGLE_CLIENT_ID` — see .dev.vars.example.",
+      );
       return;
     }
     let cancelled = false;

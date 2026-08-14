@@ -18,6 +18,17 @@ import { generateApiToken } from "./tokens";
  *   GET    /auth/session          - returns { email } if logged in, 401
  *                                   otherwise. Lets the frontend check
  *                                   auth state on load.
+ *   GET    /auth/config           - PUBLIC, no session required. Returns
+ *                                   { googleClientId } read from the
+ *                                   Worker's GOOGLE_CLIENT_ID env var. A
+ *                                   Google OAuth Client ID is meant to be
+ *                                   public (it's embedded in every Google
+ *                                   Sign-In button on the web) — this lets
+ *                                   the frontend pick it up from the same
+ *                                   `wrangler secret put` a self-hoster
+ *                                   already has to run, instead of a
+ *                                   separate frontend-build-time env var
+ *                                   that would need a rebuild to change.
  *   POST   /auth/tokens           - requires a session. body { label? }.
  *                                   Creates an agent API token, returns the
  *                                   PLAINTEXT token once: { id, token,
@@ -48,6 +59,10 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
       const session = await requireSession(request, env);
       if (!session) return json({ error: "Not authenticated" }, 401);
       return json({ email: session.email });
+    }
+
+    if (request.method === "GET" && url.pathname === "/auth/config") {
+      return json({ googleClientId: env.GOOGLE_CLIENT_ID ?? null });
     }
 
     if (url.pathname === "/auth/tokens") {
