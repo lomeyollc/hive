@@ -33,7 +33,7 @@
     {
       "binding": "DB",
       "database_name": "hive",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "9297e55f-4668-4df6-a0e0-9be3bd0eb097",
       "migrations_dir": "./migrations"
     }
   ],
