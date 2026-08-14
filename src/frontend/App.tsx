@@ -8,6 +8,7 @@ import { BoardDetailPage } from "@/pages/BoardDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WorkspacePage } from "@/pages/WorkspacePage";
 import { NeedsYouPage } from "@/pages/NeedsYouPage";
+import { ActivityPage } from "@/pages/ActivityPage";
 import { AcceptInvitePage } from "@/pages/AcceptInvitePage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
@@ -26,6 +27,7 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
  *   /needs-you           - every needs_human task across every board,
  *                          grouped by board (protected) — the nav badge's
  *                          landing page
+ *   /activity            - cross-board activity feed + search (protected)
  *   /workspace           - members list + invite dialog (protected)
  *   /invites/:token       - accept-invite landing page (PUBLIC — an invited
  *                          user has no session yet). Sign in with Google,
@@ -50,6 +52,7 @@ export default function App() {
             <Route path="/boards/:slug/tasks/:taskId" element={<BoardDetailPage />} />
             <Route path="/workspace" element={<WorkspacePage />} />
             <Route path="/needs-you" element={<NeedsYouPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Route>

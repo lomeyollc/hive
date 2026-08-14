@@ -18,6 +18,11 @@ import { hashToken } from "../auth/tokenHash";
 export interface AuthedToken {
   id: string;
   name: string | null;
+  /** The human who created this token, via /auth/tokens. Used to scope
+   *  cross-board queries (activity, search) to whatever workspaces that
+   *  human is an active member of — an agent's token acts within its
+   *  owner's membership, it never gets a wider view than they have. */
+  createdBy: string | null;
 }
 
 /**
@@ -43,10 +48,10 @@ export async function authenticate(request: Request, db: D1Database): Promise<Au
   const tokenHash = await hashToken(token);
   const row = await db
     .prepare(
-      `SELECT id, name FROM api_tokens WHERE token_hash = ?1 AND revoked_at IS NULL LIMIT 1`
+      `SELECT id, name, created_by FROM api_tokens WHERE token_hash = ?1 AND revoked_at IS NULL LIMIT 1`
     )
     .bind(tokenHash)
-    .first<{ id: string; name: string | null }>();
+    .first<{ id: string; name: string | null; created_by: string | null }>();
 
   if (!row) {
     return null;
@@ -59,7 +64,7 @@ export async function authenticate(request: Request, db: D1Database): Promise<Au
       // Best-effort telemetry only — never fail auth over this.
     });
 
-  return row;
+  return { id: row.id, name: row.name, createdBy: row.created_by };
 }
 
 export function unauthorizedResponse(): Response {

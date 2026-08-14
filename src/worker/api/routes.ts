@@ -55,6 +55,17 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *   POST   /api/workspaces/:id/invites { email }   -> { invite_url } (201)
  *          Creates an 'invited' member row + token. No email is sent — the
  *          caller is responsible for handing the URL to the invitee.
+ *   GET    /api/activity  ?board=&type=&since=&limit=
+ *          -> { items: [...] }
+ *          Cross-board (workspace-scoped) event log — task created/updated/
+ *          claimed/deleted, comment added. Written by BoardDO alongside its
+ *          existing D1 sync (activity_log table, migrations/0004). `since`
+ *          is an ISO timestamp; `limit` defaults to 50, capped at 200.
+ *   GET    /api/search  ?q=
+ *          -> { tasks: [...], comments: [...] }
+ *          Cross-board (workspace-scoped) substring search over task
+ *          title/description and comment body. Reads tasks_index and the
+ *          new comments_index mirror — never opens a Durable Object.
  *   GET    /api/boards                          -> { boards: Board[] }
  *          Scoped to workspaces the caller is an active member of.
  *   POST   /api/boards            { id, name, description?, workspace_id }
@@ -109,6 +120,16 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     // /api/needs-human — cross-board, powers the nav badge ("what's stuck on me")
     if (parts.length === 2 && parts[1] === "needs-human" && request.method === "GET") {
       return await listNeedsHuman(env, session.email);
+    }
+
+    // /api/activity — cross-board event feed. ?board=&type=&since=&limit=
+    if (parts.length === 2 && parts[1] === "activity" && request.method === "GET") {
+      return await listActivity(env, session.email, url.searchParams);
+    }
+
+    // /api/search — cross-board task + comment search. ?q=
+    if (parts.length === 2 && parts[1] === "search" && request.method === "GET") {
+      return await searchWorkspace(env, session.email, url.searchParams);
     }
 
     // /api/workspaces
@@ -213,6 +234,101 @@ async function listNeedsHuman(env: Env, email: string): Promise<Response> {
     updated_at: r.updated_at,
   }));
   return json({ count: items.length, items });
+}
+
+async function listActivity(env: Env, email: string, params: URLSearchParams): Promise<Response> {
+  const board = params.get("board");
+  const type = params.get("type");
+  const since = params.get("since");
+  const limit = Math.min(Number(params.get("limit")) || 50, 200);
+
+  const clauses = ["m.email = ?", "m.status = 'active'"];
+  const binds: (string | number)[] = [email];
+  if (board) {
+    clauses.push("a.board_id = ?");
+    binds.push(board);
+  }
+  if (type) {
+    clauses.push("a.type = ?");
+    binds.push(type);
+  }
+  if (since) {
+    clauses.push("a.created_at > ?");
+    binds.push(since);
+  }
+  binds.push(limit);
+
+  const { results } = await env.DB.prepare(
+    `SELECT a.id, a.board_id, b.name AS board_name, a.task_id, a.type, a.actor, a.summary, a.created_at
+     FROM activity_log a
+     JOIN boards b ON b.id = a.board_id
+     JOIN workspace_members m ON m.workspace_id = a.workspace_id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY a.created_at DESC
+     LIMIT ?`,
+  )
+    .bind(...binds)
+    .all<{
+      id: string;
+      board_id: string;
+      board_name: string;
+      task_id: string | null;
+      type: string;
+      actor: string | null;
+      summary: string;
+      created_at: string;
+    }>();
+
+  return json({ items: results ?? [] });
+}
+
+async function searchWorkspace(env: Env, email: string, params: URLSearchParams): Promise<Response> {
+  const q = params.get("q")?.trim();
+  if (!q) {
+    return json({ tasks: [], comments: [] });
+  }
+  const like = `%${q}%`;
+
+  const [taskRows, commentRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT t.id, t.board_id, b.name AS board_name, t.title, t.status, t.priority, t.updated_at
+       FROM tasks_index t
+       JOIN boards b ON b.id = t.board_id
+       JOIN workspace_members m ON m.workspace_id = b.workspace_id
+       WHERE m.email = ? AND m.status = 'active' AND (t.title LIKE ? OR t.description LIKE ?)
+       ORDER BY t.updated_at DESC LIMIT 50`,
+    )
+      .bind(email, like, like)
+      .all<{
+        id: string;
+        board_id: string;
+        board_name: string;
+        title: string;
+        status: TaskStatus;
+        priority: TaskPriority;
+        updated_at: string;
+      }>(),
+    env.DB.prepare(
+      `SELECT c.id, c.board_id, b.name AS board_name, c.task_id, c.author, c.body, c.created_at
+       FROM comments_index c
+       JOIN boards b ON b.id = c.board_id
+       JOIN workspace_members m ON m.workspace_id = b.workspace_id
+       WHERE m.email = ? AND m.status = 'active' AND c.body LIKE ?
+       ORDER BY c.created_at DESC LIMIT 50`,
+    )
+      .bind(email, like)
+      .all<{
+        id: string;
+        board_id: string;
+        board_name: string;
+        task_id: string;
+        author: string | null;
+        body: string;
+        created_at: string;
+      }>(),
+  ]);
+
+  return json({ tasks: taskRows.results ?? [], comments: commentRows.results ?? [] });
 }
 
 // ── Workspaces (D1) ───────────────────────────────────────────────────────

@@ -284,17 +284,116 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     "list_boards",
     {
       title: "List Boards",
-      description: "List every board, read from the D1 cross-board index (not a DO call).",
+      description:
+        "List boards in workspaces the token owner is an active member of (D1 cross-board index, not a DO call).",
       inputSchema: {},
     },
     async () => {
       try {
+        if (!token.createdBy) return ok([]);
         const { results } = await env.DB.prepare(
-          `SELECT id, name, description, created_at FROM boards ORDER BY name ASC`
-        ).all<BoardRow>();
+          `SELECT b.id, b.name, b.description, b.created_at FROM boards b
+           JOIN workspace_members m ON m.workspace_id = b.workspace_id
+           WHERE m.email = ? AND m.status = 'active' ORDER BY b.name ASC`
+        )
+          .bind(token.createdBy)
+          .all<BoardRow>();
         return ok(results ?? []);
       } catch (e) {
         return err(`list_boards failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "list_activity",
+    {
+      title: "List Activity",
+      description:
+        "Cross-board activity feed — task created/updated/claimed/deleted, comments added. Scoped to workspaces you're an active member of. Use `since` to poll for what happened after your last check.",
+      inputSchema: {
+        board: z.string().optional().describe("Limit to one board's slug."),
+        type: z
+          .enum(["task.created", "task.updated", "task.claimed", "task.deleted", "comment.created"])
+          .optional(),
+        since: z.string().optional().describe("ISO 8601 timestamp — only events after this."),
+        limit: z.number().int().min(1).max(200).optional().describe("Defaults to 50."),
+      },
+    },
+    async ({ board, type, since, limit }) => {
+      try {
+        if (!token.createdBy) return ok({ items: [] });
+        const clauses = ["m.email = ?", "m.status = 'active'"];
+        const binds: (string | number)[] = [token.createdBy];
+        if (board) {
+          clauses.push("a.board_id = ?");
+          binds.push(board);
+        }
+        if (type) {
+          clauses.push("a.type = ?");
+          binds.push(type);
+        }
+        if (since) {
+          clauses.push("a.created_at > ?");
+          binds.push(since);
+        }
+        binds.push(limit ?? 50);
+        const { results } = await env.DB.prepare(
+          `SELECT a.id, a.board_id, b.name AS board_name, a.task_id, a.type, a.actor, a.summary, a.created_at
+           FROM activity_log a
+           JOIN boards b ON b.id = a.board_id
+           JOIN workspace_members m ON m.workspace_id = a.workspace_id
+           WHERE ${clauses.join(" AND ")}
+           ORDER BY a.created_at DESC LIMIT ?`
+        )
+          .bind(...binds)
+          .all();
+        return ok({ items: results ?? [] });
+      } catch (e) {
+        return err(`list_activity failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "search",
+    {
+      title: "Search",
+      description:
+        "Cross-board substring search over task title/description and comment body, scoped to workspaces you're an active member of.",
+      inputSchema: {
+        q: z.string().min(1),
+      },
+    },
+    async ({ q }) => {
+      try {
+        if (!token.createdBy) return ok({ tasks: [], comments: [] });
+        const like = `%${q}%`;
+        const [taskRows, commentRows] = await Promise.all([
+          env.DB.prepare(
+            `SELECT t.id, t.board_id, b.name AS board_name, t.title, t.status, t.priority, t.updated_at
+             FROM tasks_index t
+             JOIN boards b ON b.id = t.board_id
+             JOIN workspace_members m ON m.workspace_id = b.workspace_id
+             WHERE m.email = ? AND m.status = 'active' AND (t.title LIKE ? OR t.description LIKE ?)
+             ORDER BY t.updated_at DESC LIMIT 50`
+          )
+            .bind(token.createdBy, like, like)
+            .all(),
+          env.DB.prepare(
+            `SELECT c.id, c.board_id, b.name AS board_name, c.task_id, c.author, c.body, c.created_at
+             FROM comments_index c
+             JOIN boards b ON b.id = c.board_id
+             JOIN workspace_members m ON m.workspace_id = b.workspace_id
+             WHERE m.email = ? AND m.status = 'active' AND c.body LIKE ?
+             ORDER BY c.created_at DESC LIMIT 50`
+          )
+            .bind(token.createdBy, like)
+            .all(),
+        ]);
+        return ok({ tasks: taskRows.results ?? [], comments: commentRows.results ?? [] });
+      } catch (e) {
+        return err(`search failed: ${(e as Error).message}`);
       }
     }
   );

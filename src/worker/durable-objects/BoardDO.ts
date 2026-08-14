@@ -409,6 +409,9 @@ export class BoardDO extends DurableObject<Env> {
   }
 
   deleteTask(id: string): void {
+    const existing = this.ctx.storage.sql
+      .exec<{ title: string }>("SELECT title FROM tasks WHERE id = ?", id)
+      .toArray()[0];
     const result = this.ctx.storage.sql.exec("DELETE FROM tasks WHERE id = ?", id);
     if (result.rowsWritten === 0) {
       throw new NotFoundError(`task ${id} not found`);
@@ -418,6 +421,7 @@ export class BoardDO extends DurableObject<Env> {
     const at = new Date().toISOString();
     this.#broadcast({ type: "task.deleted", boardId: this.boardId, taskId: id, at });
     this.#syncDeleteToIndex(id);
+    this.#logActivity("task.deleted", id, null, `deleted "${existing?.title ?? id}"`);
   }
 
   /**
@@ -520,9 +524,10 @@ export class BoardDO extends DurableObject<Env> {
 
     const comment = toComment(row);
     this.#broadcast({ type: "comment.created", boardId: this.boardId, comment, at: now });
-    // Comments aren't indexed in D1 (tasks_index is task-only per spec), but
-    // touch the parent task's updated_at so the dashboard reflects activity.
+    // Touch the parent task's updated_at so the dashboard reflects activity.
     this.ctx.storage.sql.exec("UPDATE tasks SET updated_at = ? WHERE id = ?", now, taskId);
+    this.#syncCommentToIndex(comment, this.boardId);
+    this.#logActivity("comment.created", taskId, comment.author, `commented: "${body.slice(0, 80)}"`);
     return comment;
   }
 
@@ -647,6 +652,9 @@ export class BoardDO extends DurableObject<Env> {
   #afterWrite(event: BoardEvent, task: Task): void {
     this.#broadcast(event);
     this.#syncTaskToIndex(task);
+    const verb = event.type === "task.created" ? "created" : event.type === "task.claimed" ? "claimed" : "updated";
+    const actor = event.type === "task.claimed" ? task.claimedBy : (task.createdBy ?? task.claimedBy);
+    this.#logActivity(event.type, task.id, actor, `${verb} "${task.title}"`);
   }
 
   #broadcast(event: BoardEvent): void {
@@ -669,17 +677,18 @@ export class BoardDO extends DurableObject<Env> {
    */
   #syncTaskToIndex(task: Task): void {
     const query = this.env.DB.prepare(
-      `INSERT INTO tasks_index (id, board_id, title, status, priority, assignee, labels, due_date, updated_at, needs_human, needs_human_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO tasks_index (id, board_id, title, description, status, priority, assignee, labels, due_date, updated_at, needs_human, needs_human_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         board_id = excluded.board_id, title = excluded.title, status = excluded.status,
-         priority = excluded.priority, assignee = excluded.assignee, labels = excluded.labels,
-         due_date = excluded.due_date, updated_at = excluded.updated_at,
+         board_id = excluded.board_id, title = excluded.title, description = excluded.description,
+         status = excluded.status, priority = excluded.priority, assignee = excluded.assignee,
+         labels = excluded.labels, due_date = excluded.due_date, updated_at = excluded.updated_at,
          needs_human = excluded.needs_human, needs_human_reason = excluded.needs_human_reason`,
     ).bind(
       task.id,
       task.boardId,
       task.title,
+      task.description,
       task.status,
       task.priority,
       task.assignee,
@@ -694,6 +703,71 @@ export class BoardDO extends DurableObject<Env> {
         console.error(`BoardDO: D1 tasks_index sync failed for task ${task.id}:`, error);
       }),
     );
+  }
+
+  /**
+   * Fire-and-forget mirror of a comment into D1's `comments_index` — the
+   * only reason a comment ever touches D1 at all, since BoardDO's own
+   * SQLite remains authoritative. Exists purely so cross-board search can
+   * find comment content without opening every board's Durable Object.
+   */
+  #syncCommentToIndex(comment: Comment, boardId: string): void {
+    const query = this.env.DB.prepare(
+      `INSERT INTO comments_index (id, board_id, task_id, author, body, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING`,
+    ).bind(comment.id, boardId, comment.taskId, comment.author, comment.body, comment.createdAt);
+    this.ctx.waitUntil(
+      query.run().catch((error) => {
+        console.error(`BoardDO: D1 comments_index sync failed for comment ${comment.id}:`, error);
+      }),
+    );
+  }
+
+  /**
+   * Fire-and-forget activity-log write — the cross-board feed's only data
+   * source. Looks up this board's workspace_id once and caches it in
+   * memory (a board's workspace essentially never changes) rather than
+   * querying D1 on every single write.
+   */
+  #workspaceId: string | null = null;
+
+  #logActivity(type: string, taskId: string | null, actor: string | null | undefined, summary: string): void {
+    this.ctx.waitUntil(this.#logActivityAsync(type, taskId, actor, summary));
+  }
+
+  async #logActivityAsync(
+    type: string,
+    taskId: string | null,
+    actor: string | null | undefined,
+    summary: string,
+  ): Promise<void> {
+    try {
+      if (this.#workspaceId === null) {
+        const row = await this.env.DB.prepare(`SELECT workspace_id FROM boards WHERE id = ?`)
+          .bind(this.boardId)
+          .first<{ workspace_id: string | null }>();
+        this.#workspaceId = row?.workspace_id ?? "";
+      }
+      if (!this.#workspaceId) return; // board not yet registered in D1 — nothing to scope the log to
+      await this.env.DB.prepare(
+        `INSERT INTO activity_log (id, workspace_id, board_id, task_id, type, actor, summary, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          crypto.randomUUID(),
+          this.#workspaceId,
+          this.boardId,
+          taskId,
+          type,
+          actor ?? null,
+          summary,
+          new Date().toISOString(),
+        )
+        .run();
+    } catch (error) {
+      console.error(`BoardDO: activity_log write failed (type=${type}):`, error);
+    }
   }
 
   /**

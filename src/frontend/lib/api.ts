@@ -353,6 +353,51 @@ export async function listNeedsHuman(): Promise<NeedsHumanItem[]> {
   return data.items;
 }
 
+export interface ActivityItem {
+  id: string;
+  board_id: string;
+  board_name: string;
+  task_id: string | null;
+  type: "task.created" | "task.updated" | "task.claimed" | "task.deleted" | "comment.created";
+  actor: string | null;
+  summary: string;
+  created_at: string;
+}
+
+export async function listActivity(params?: { board?: string; since?: string }): Promise<ActivityItem[]> {
+  const qs = new URLSearchParams();
+  if (params?.board) qs.set("board", params.board);
+  if (params?.since) qs.set("since", params.since);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await request<{ items: ActivityItem[] }>(`/api/activity${suffix}`);
+  return data.items;
+}
+
+export interface SearchTaskResult {
+  id: string;
+  board_id: string;
+  board_name: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  updated_at: string;
+}
+
+export interface SearchCommentResult {
+  id: string;
+  board_id: string;
+  board_name: string;
+  task_id: string;
+  author: string | null;
+  body: string;
+  created_at: string;
+}
+
+export async function search(q: string): Promise<{ tasks: SearchTaskResult[]; comments: SearchCommentResult[] }> {
+  if (!q.trim()) return { tasks: [], comments: [] };
+  return request(`/api/search?q=${encodeURIComponent(q)}`);
+}
+
 // ---------------------------------------------------------------------------
 // Realtime
 // ---------------------------------------------------------------------------
