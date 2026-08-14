@@ -39,12 +39,18 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *   POST   /api/boards            { id, name, description? }
  *                                                -> { board: Board } (201)
  *   GET    /api/boards/:slug                     -> { board: Board }
+ *   PATCH  /api/boards/:slug      { name?, description? }
+ *                                                -> { board: Board }
+ *   DELETE /api/boards/:slug                     -> { ok: true }
+ *          Removes the board's D1 record/index only (see deleteBoard's own
+ *          comment for why its Durable Object is left alone).
  *   GET    /api/boards/:slug/tasks  ?status=&assignee=
  *                                                -> { tasks: Task[] }
  *   POST   /api/boards/:slug/tasks  CreateTaskInput (snake_case)
  *                                                -> { task: Task } (201)
  *   PATCH  /api/boards/:slug/tasks/:id  Partial<Task> (snake_case)
  *                                                -> { task: Task }
+ *   DELETE /api/boards/:slug/tasks/:id           -> { ok: true }
  *   POST   /api/boards/:slug/tasks/:id/claim     -> { task: Task }
  *          Claims this SPECIFIC task for the signed-in human (sets
  *          claimed_by to their email, status to in_progress) — distinct
@@ -56,10 +62,6 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *   POST   /api/boards/:slug/tasks/:id/comments  { body: string }
  *                                                -> { comment: Comment } (201)
  *
- * Board creation has no UI (BoardListPage says "Boards are created
- * server-side" and links to the README) but the endpoint above exists so
- * self-hosters have something friendlier than a raw D1 INSERT — see
- * README.md "Creating a board".
  */
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
@@ -80,6 +82,8 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     // /api/boards/:slug
     if (parts.length === 3 && parts[1] === "boards") {
       if (request.method === "GET") return await getBoard(env, parts[2]);
+      if (request.method === "PATCH") return await updateBoard(request, env, parts[2]);
+      if (request.method === "DELETE") return await deleteBoard(env, parts[2]);
     }
 
     // /api/boards/:slug/tasks
@@ -93,6 +97,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     if (parts.length === 5 && parts[1] === "boards" && parts[3] === "tasks") {
       const [, , slug, , taskId] = parts;
       if (request.method === "PATCH") return await updateTask(request, env, slug, taskId);
+      if (request.method === "DELETE") return await deleteTask(env, slug, taskId);
     }
 
     // /api/boards/:slug/tasks/:id/claim
@@ -196,6 +201,54 @@ async function createBoard(request: Request, env: Env): Promise<Response> {
   return json({ board: boardToWire({ id, name, description: body.description ?? null, created_at: createdAt }) }, 201);
 }
 
+async function updateBoard(request: Request, env: Env, slug: string): Promise<Response> {
+  const body = await readJson<{ name?: string; description?: string }>(request);
+  const existing = await env.DB.prepare(`SELECT id, name, description, created_at FROM boards WHERE id = ?`)
+    .bind(slug)
+    .first<BoardRow>();
+  if (!existing) {
+    throw new NotFoundError(`board "${slug}" not found`);
+  }
+
+  const name = body.name?.trim();
+  if (name !== undefined && !name) {
+    throw new ValidationError("name cannot be empty");
+  }
+
+  await env.DB.prepare(`UPDATE boards SET name = COALESCE(?, name), description = ? WHERE id = ?`)
+    .bind(name ?? null, body.description !== undefined ? body.description.trim() || null : existing.description, slug)
+    .run();
+
+  return json({
+    board: boardToWire({
+      id: existing.id,
+      name: name ?? existing.name,
+      description: body.description !== undefined ? body.description.trim() || null : existing.description,
+      created_at: existing.created_at,
+    }),
+  });
+}
+
+async function deleteBoard(env: Env, slug: string): Promise<Response> {
+  const existing = await env.DB.prepare(`SELECT id FROM boards WHERE id = ?`).bind(slug).first<{ id: string }>();
+  if (!existing) {
+    throw new NotFoundError(`board "${slug}" not found`);
+  }
+
+  // Deletes the board's D1 record and index rows. The board's Durable
+  // Object (its tasks/comments) is left in place — Cloudflare has no API to
+  // destroy a DO instance, and an unreferenced DO costs nothing at rest.
+  // Re-creating a board with the same id later would see that DO's old
+  // tasks reappear; that's an accepted v1 tradeoff, documented in the
+  // README rather than solved with a wipe-on-delete RPC call.
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM tasks_index WHERE board_id = ?`).bind(slug),
+    env.DB.prepare(`DELETE FROM boards WHERE id = ?`).bind(slug),
+  ]);
+
+  return json({ ok: true });
+}
+
 function boardToWire(row: BoardRow, counts?: Record<TaskStatus, number>) {
   return {
     id: row.id,
@@ -250,6 +303,12 @@ async function updateTask(request: Request, env: Env, slug: string, taskId: stri
   };
   const task = await env.BOARD_DO.getByName(slug).updateTask(taskId, patch);
   return json({ task: taskToWire(task) });
+}
+
+async function deleteTask(env: Env, slug: string, taskId: string): Promise<Response> {
+  await env.BOARD_DO.getByName(slug).deleteTask(taskId);
+  await env.DB.prepare(`DELETE FROM tasks_index WHERE id = ?`).bind(taskId).run();
+  return json({ ok: true });
 }
 
 async function claimTask(env: Env, slug: string, taskId: string, claimedBy: string): Promise<Response> {

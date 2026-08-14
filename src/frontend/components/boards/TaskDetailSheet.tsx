@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { claimTask, createComment, listComments, updateTask } from "@/lib/api";
+import { claimTask, createComment, deleteTask, listComments, updateTask } from "@/lib/api";
 import type { Comment, Task } from "@/lib/types";
 import { STATUS_OPTIONS, StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
+import { EditTaskDialog } from "@/components/boards/EditTaskDialog";
 import {
   Sheet,
   SheetContent,
@@ -17,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hand } from "lucide-react";
+import { Hand, Trash2 } from "lucide-react";
 
 function formatDateTime(iso: string) {
   try {
@@ -32,6 +33,7 @@ export function TaskDetailSheet({
   task,
   onOpenChange,
   onTaskUpdated,
+  onTaskDeleted,
   /** Newest comments pushed in over the board WebSocket while this task is open. */
   liveComments,
 }: {
@@ -39,6 +41,7 @@ export function TaskDetailSheet({
   task: Task | null;
   onOpenChange: (open: boolean) => void;
   onTaskUpdated: (task: Task) => void;
+  onTaskDeleted: (taskId: string) => void;
   liveComments: Comment[];
 }) {
   const [comments, setComments] = useState<Comment[] | null>(null);
@@ -46,6 +49,7 @@ export function TaskDetailSheet({
   const [posting, setPosting] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!task) {
@@ -129,6 +133,22 @@ export function TaskDetailSheet({
     }
   }
 
+  async function handleDelete() {
+    if (!task) return;
+    if (!window.confirm(`Delete "${task.title}"? This can't be undone.`)) return;
+    setDeleting(true);
+    try {
+      await deleteTask(boardSlug, task.id);
+      toast.success("Task deleted");
+      onTaskDeleted(task.id);
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete task");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <Sheet open={task !== null} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col gap-0 sm:max-w-lg">
@@ -145,6 +165,13 @@ export function TaskDetailSheet({
                 {label}
               </span>
             ))}
+            <div className="ml-auto flex gap-1.5">
+              <EditTaskDialog boardSlug={boardSlug} task={task} onUpdated={onTaskUpdated} />
+              <Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={deleting} onClick={handleDelete}>
+                <Trash2 className="size-3.5" />
+                {deleting ? "Deleting…" : "Delete"}
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-sm">

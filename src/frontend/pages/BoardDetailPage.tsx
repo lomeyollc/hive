@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, Search } from "lucide-react";
 import { toast } from "sonner";
 import { claimTask, listTasks } from "@/lib/api";
 import { useBoardSocket } from "@/hooks/use-board-socket";
 import type { Comment, Task, TaskStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateTaskDialog } from "@/components/boards/CreateTaskDialog";
+import { BoardSettingsMenu } from "@/components/boards/BoardSettingsMenu";
 import { TaskCard } from "@/components/boards/TaskCard";
 import { TaskDetailSheet } from "@/components/boards/TaskDetailSheet";
 
@@ -22,9 +24,11 @@ const TABS: { value: "all" | TaskStatus; label: string }[] = [
 
 export function BoardDetailPage() {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | TaskStatus>("all");
+  const [search, setSearch] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [liveComments, setLiveComments] = useState<Comment[]>([]);
@@ -88,8 +92,15 @@ export function BoardDetailPage() {
 
   const visibleTasks = useMemo(() => {
     if (!tasks) return [];
-    return filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
-  }, [tasks, filter]);
+    let result = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      result = result.filter(
+        (t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [tasks, filter, search]);
 
   const selectedTask = tasks?.find((t) => t.id === selectedTaskId) ?? null;
 
@@ -124,22 +135,35 @@ export function BoardDetailPage() {
               {tasks ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "Loading…"}
             </p>
           </div>
+          <BoardSettingsMenu slug={slug} onDeleted={() => navigate("/boards")} />
         </div>
         <CreateTaskDialog boardSlug={slug} onCreated={upsertTask} />
       </div>
 
-      <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-        <TabsList>
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
-              {tab.label}
-              {tab.value !== "all" && counts[tab.value] > 0 && (
-                <span className="ml-1.5 text-xs text-muted-foreground">{counts[tab.value]}</span>
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+          <TabsList>
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>
+                {tab.label}
+                {tab.value !== "all" && counts[tab.value] > 0 && (
+                  <span className="ml-1.5 text-xs text-muted-foreground">{counts[tab.value]}</span>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
+        <div className="relative w-full max-w-[220px]">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tasks…"
+            className="h-8 pl-8 text-sm"
+          />
+        </div>
+      </div>
 
       {error && (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -178,6 +202,10 @@ export function BoardDetailPage() {
         task={selectedTask}
         onOpenChange={(open) => !open && setSelectedTaskId(null)}
         onTaskUpdated={upsertTask}
+        onTaskDeleted={(taskId) => {
+          setTasks((prev) => prev?.filter((t) => t.id !== taskId) ?? prev);
+          setSelectedTaskId(null);
+        }}
         liveComments={liveComments}
       />
     </div>

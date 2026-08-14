@@ -10,9 +10,12 @@ per instance, so every write — whether it comes from you or from ten agents
 at once — is serialized for free. No locking code, no lost updates, no
 double-claimed tasks.
 
-**Status: early / under active development.** Core task/board CRUD, atomic
-claiming, realtime WebSocket updates, the MCP server, the REST API, and the
-React frontend are implemented — see [Architecture](#architecture) below.
+**Status: early / under active development.** Full task/board CRUD (create,
+edit, delete, search/filter) is in the UI, atomic claiming, realtime
+WebSocket updates, the MCP server, the REST API, and the React frontend are
+all implemented — see [Architecture](#architecture) below. Not yet built:
+tests, CI, an audit trail of agent actions, and real multi-user auth beyond
+a shared allowlist.
 
 ## Architecture
 

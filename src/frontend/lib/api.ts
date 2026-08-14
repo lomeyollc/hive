@@ -165,6 +165,18 @@ export async function createBoard(input: { id: string; name: string; description
   return data.board;
 }
 
+export async function updateBoard(slug: string, patch: { name?: string; description?: string }): Promise<Board> {
+  const data = await request<{ board: Board }>(`/api/boards/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return data.board;
+}
+
+export async function deleteBoard(slug: string): Promise<void> {
+  await request<void>(`/api/boards/${encodeURIComponent(slug)}`, { method: "DELETE" });
+}
+
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
@@ -220,6 +232,12 @@ export async function claimTask(slug: string, taskId: string): Promise<Task> {
     { method: "POST" },
   );
   return data.task;
+}
+
+export async function deleteTask(slug: string, taskId: string): Promise<void> {
+  await request<void>(`/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  });
 }
 
 // ---------------------------------------------------------------------------
