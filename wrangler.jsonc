@@ -13,7 +13,7 @@
     "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/mcp/*", "/auth/*", "/ws/*"]
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/auth/*", "/ws/*"]
   },
 
   // One BoardDO instance per board (DO id = board slug). SQLite storage backend
