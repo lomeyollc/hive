@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { LayoutGrid, Settings, LogOut } from "lucide-react";
+import { Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
+import { HiveLogo } from "@/components/icons/HiveLogo";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,7 +25,7 @@ export function AppShell() {
       <header className="border-b">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
           <Link to="/boards" className="flex items-center gap-2 font-semibold">
-            <LayoutGrid className="size-5" />
+            <HiveLogo className="size-5" />
             Hive
           </Link>
 

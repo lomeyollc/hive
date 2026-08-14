@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/logo.png" width="96" height="96" alt="Hive logo"></p>
+
 # Hive
 
 Hive is an open-source, AI-agent-native task/project manager. Built so a

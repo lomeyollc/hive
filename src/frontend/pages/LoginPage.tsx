@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { LayoutGrid } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
+import { HiveLogo } from "@/components/icons/HiveLogo";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -18,7 +18,7 @@ export function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <LayoutGrid className="size-5" />
+            <HiveLogo className="size-5" />
           </div>
           <CardTitle className="text-xl">Sign in to Hive</CardTitle>
           <CardDescription>The shared task board for you and your AI agents.</CardDescription>
