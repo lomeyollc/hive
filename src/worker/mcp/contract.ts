@@ -50,6 +50,7 @@ import type {
   UpdateTaskInput,
   ListTasksFilter,
   ClaimNextTaskFilter,
+  CreateCommentInput,
 } from "../durable-objects/types";
 
 /**
@@ -59,10 +60,10 @@ import type {
  */
 export interface BoardDOStub {
   createTask(input: CreateTaskInput): Promise<Task>;
-  getTask(id: string): Promise<Task | null>;
+  getTask(id: string): Promise<Task>;
   updateTask(id: string, patch: UpdateTaskInput): Promise<Task>;
   claimNextTask(filter: ClaimNextTaskFilter | undefined, claimedBy: string): Promise<Task | null>;
-  commentTask(taskId: string, author: string, body: string): Promise<Comment>;
+  commentTask(taskId: string, input: CreateCommentInput): Promise<Comment>;
   listTasks(filter?: ListTasksFilter): Promise<Task[]>;
 }
 

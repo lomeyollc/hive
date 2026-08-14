@@ -1,3 +1,5 @@
+import { hashToken } from "../auth/tokenHash";
+
 /**
  * Bearer-token auth for the MCP route.
  *
@@ -6,20 +8,16 @@
  *
  *   api_tokens(id, token_hash, name, created_by, created_at, last_used_at, revoked_at)
  *
- * `token_hash` is the lowercase-hex SHA-256 of the raw token string. The
- * settings-page token-generation flow (owned by the auth-implementing
- * agent) is expected to show the raw token once and store only this hash.
+ * `token_hash` is the lowercase-hex SHA-256 of the raw token string,
+ * produced by the shared `hashToken()` util in `../auth/tokenHash` — the
+ * same function the token-generation flow (`../auth/routes.ts`) hashes
+ * with before storing. Both sides must hash identically or a valid token
+ * looks invalid; see that file's doc comment.
  */
 
 export interface AuthedToken {
   id: string;
   name: string | null;
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -42,7 +40,7 @@ export async function authenticate(request: Request, db: D1Database): Promise<Au
     return null;
   }
 
-  const tokenHash = await sha256Hex(token);
+  const tokenHash = await hashToken(token);
   const row = await db
     .prepare(
       `SELECT id, name FROM api_tokens WHERE token_hash = ?1 AND revoked_at IS NULL LIMIT 1`

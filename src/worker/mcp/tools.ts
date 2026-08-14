@@ -95,9 +95,6 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     async ({ board, task_id }) => {
       try {
         const task = await boardStub(env, board).getTask(task_id);
-        if (!task) {
-          return err(`No task ${task_id} on board "${board}"`);
-        }
         return ok(task);
       } catch (e) {
         return err(`get_task failed: ${(e as Error).message}`);
@@ -178,7 +175,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     },
     async ({ board, task_id, author, body }) => {
       try {
-        const comment = await boardStub(env, board).commentTask(task_id, author, body);
+        const comment = await boardStub(env, board).commentTask(task_id, { author, body });
         return ok(comment);
       } catch (e) {
         return err(`comment_task failed: ${(e as Error).message}`);
