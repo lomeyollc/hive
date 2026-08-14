@@ -157,6 +157,14 @@ export async function getBoard(slug: string): Promise<Board> {
   return data.board;
 }
 
+export async function createBoard(input: { id: string; name: string; description?: string }): Promise<Board> {
+  const data = await request<{ board: Board }>("/api/boards", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.board;
+}
+
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------

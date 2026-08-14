@@ -17,9 +17,9 @@ export function HiveLogo({ className }: { className?: string }) {
         strokeWidth="2"
         strokeLinejoin="round"
       />
-      <circle cx="12" cy="10" r="1.3" fill="currentColor" />
-      <circle cx="9.3" cy="15" r="1.3" fill="currentColor" />
-      <circle cx="14.7" cy="15" r="1.3" fill="currentColor" />
+      <circle cx="12" cy="10" r="1.3" fill="#F5A623" />
+      <circle cx="9.3" cy="15" r="1.3" fill="#F5A623" />
+      <circle cx="14.7" cy="15" r="1.3" fill="#F5A623" />
     </svg>
   );
 }

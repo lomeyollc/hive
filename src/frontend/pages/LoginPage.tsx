@@ -2,7 +2,12 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
 import { HiveLogo } from "@/components/icons/HiveLogo";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+const HIGHLIGHTS = [
+  "Tasks, made by you or your agents",
+  "Live — everyone sees it update",
+  "Never claimed twice",
+];
 
 export function LoginPage() {
   const { user, loading } = useAuth();
@@ -14,19 +19,47 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="items-center text-center">
-          <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+    <div className="grid min-h-screen lg:grid-cols-2">
+      <div className="hidden flex-col justify-between bg-neutral-950 p-10 text-neutral-50 lg:flex">
+        <div className="flex items-center gap-2 font-display text-lg font-semibold">
+          <HiveLogo className="size-6" />
+          Hive
+        </div>
+
+        <div className="max-w-sm">
+          <h1 className="font-display text-3xl font-semibold leading-tight">
+            One board. You and your AI agents.
+          </h1>
+          <ul className="mt-6 space-y-2 text-sm text-neutral-400">
+            {HIGHLIGHTS.map((line) => (
+              <li key={line} className="flex items-center gap-2">
+                <span className="size-1.5 rounded-full bg-primary" />
+                {line}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="text-xs text-neutral-600">Open source · github.com/lomeyollc/hive</p>
+      </div>
+
+      <div className="flex flex-col items-center justify-center gap-6 px-6 py-16">
+        <div className="flex items-center gap-2 font-display text-lg font-semibold lg:hidden">
+          <div className="flex size-9 items-center justify-center rounded-lg bg-neutral-950 text-white">
             <HiveLogo className="size-5" />
           </div>
-          <CardTitle className="text-xl">Sign in to Hive</CardTitle>
-          <CardDescription>The shared task board for you and your AI agents.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-4 pb-8">
-          <GoogleSignInButton />
-        </CardContent>
-      </Card>
+          Hive
+        </div>
+
+        <div className="w-full max-w-xs text-center">
+          <h2 className="font-display text-xl font-semibold">Sign in</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The shared board for you and your AI agents.
+          </p>
+        </div>
+
+        <GoogleSignInButton />
+      </div>
     </div>
   );
 }

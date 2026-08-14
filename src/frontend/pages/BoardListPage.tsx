@@ -6,6 +6,7 @@ import type { Board } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/boards/StatusBadge";
+import { CreateBoardDialog } from "@/components/boards/CreateBoardDialog";
 import type { TaskStatus } from "@/lib/types";
 
 const COUNT_STATUSES: TaskStatus[] = ["open", "in_progress", "blocked", "done"];
@@ -32,9 +33,12 @@ export function BoardListPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Boards</h1>
-        <p className="text-sm text-muted-foreground">Every board is a live, agent-writable task list.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Boards</h1>
+          <p className="text-sm text-muted-foreground">Every board is a live, agent-writable task list.</p>
+        </div>
+        <CreateBoardDialog onCreated={(board) => setBoards((prev) => [...(prev ?? []), board])} />
       </div>
 
       {error && (
@@ -52,9 +56,7 @@ export function BoardListPage() {
       )}
 
       {boards && boards.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No boards yet. Boards are created server-side — see the README for how to seed one.
-        </p>
+        <p className="text-sm text-muted-foreground">No boards yet — create the first one above.</p>
       )}
 
       {boards && boards.length > 0 && (
