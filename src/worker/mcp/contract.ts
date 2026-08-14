@@ -62,6 +62,7 @@ export interface BoardDOStub {
   createTask(input: CreateTaskInput): Promise<Task>;
   getTask(id: string): Promise<Task>;
   updateTask(id: string, patch: UpdateTaskInput): Promise<Task>;
+  deleteTask(id: string): Promise<void>;
   claimNextTask(filter: ClaimNextTaskFilter | undefined, claimedBy: string): Promise<Task | null>;
   commentTask(taskId: string, input: CreateCommentInput): Promise<Comment>;
   listTasks(filter?: ListTasksFilter): Promise<Task[]>;

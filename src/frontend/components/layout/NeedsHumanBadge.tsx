@@ -34,7 +34,7 @@ export function NeedsHumanBadge() {
 
   return (
     <Link
-      to="/boards"
+      to="/needs-you"
       className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1 text-sm font-medium text-destructive"
     >
       <AlertTriangle className="size-3.5" />

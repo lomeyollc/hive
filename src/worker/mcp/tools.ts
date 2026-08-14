@@ -213,6 +213,26 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
   );
 
   server.registerTool(
+    "delete_task",
+    {
+      title: "Delete Task",
+      description: "Permanently delete a task. No confirmation step — the caller decides.",
+      inputSchema: {
+        board: z.string(),
+        task_id: z.string(),
+      },
+    },
+    async ({ board, task_id }) => {
+      try {
+        await boardStub(env, board).deleteTask(task_id);
+        return ok({ deleted: task_id });
+      } catch (e) {
+        return err(`delete_task failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
     "comment_task",
     {
       title: "Comment on Task",

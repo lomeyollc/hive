@@ -37,10 +37,11 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *
  * Routes:
  *   GET    /api/needs-human                      -> { count, items: [...] }
- *          Cross-board — every task currently flagged needs_human, oldest
- *          first. Powers the nav badge; the same signal that drives the
- *          Telegram ping/digest (BoardDO.#notifyNeedsHuman, index.ts
- *          scheduled()), read back for in-app visibility.
+ *          Cross-board (scoped to the caller's active workspace memberships)
+ *          — every task currently flagged needs_human, oldest first.
+ *          Powers the nav badge AND the /needs-you page; the same signal
+ *          that drives the Telegram ping/digest (BoardDO.#notifyNeedsHuman,
+ *          index.ts scheduled()), read back for in-app visibility.
  *   GET    /api/invites/:token                   PUBLIC — no session required
  *          (an invited user hasn't logged in yet). -> { workspace_name, email, status }
  *   POST   /api/invites/:token/accept             session-gated. The session
@@ -107,7 +108,7 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
 
     // /api/needs-human — cross-board, powers the nav badge ("what's stuck on me")
     if (parts.length === 2 && parts[1] === "needs-human" && request.method === "GET") {
-      return await listNeedsHuman(env);
+      return await listNeedsHuman(env, session.email);
     }
 
     // /api/workspaces
@@ -179,16 +180,35 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
   }
 }
 
-async function listNeedsHuman(env: Env): Promise<Response> {
+async function listNeedsHuman(env: Env, email: string): Promise<Response> {
+  // Scoped to workspaces the caller is an active member of — same rule as
+  // listBoards. Without this join, needs-human would leak titles/reasons
+  // from boards in workspaces the caller isn't in.
   const { results } = await env.DB.prepare(
-    `SELECT id, board_id, title, needs_human_reason, updated_at
-     FROM tasks_index WHERE needs_human = 1 ORDER BY updated_at ASC`,
-  ).all<{ id: string; board_id: string; title: string; needs_human_reason: string | null; updated_at: string }>();
+    `SELECT t.id, t.board_id, b.name AS board_name, t.title, t.priority, t.needs_human_reason, t.updated_at
+     FROM tasks_index t
+     JOIN boards b ON b.id = t.board_id
+     JOIN workspace_members m ON m.workspace_id = b.workspace_id
+     WHERE t.needs_human = 1 AND m.email = ? AND m.status = 'active'
+     ORDER BY t.updated_at ASC`,
+  )
+    .bind(email)
+    .all<{
+      id: string;
+      board_id: string;
+      board_name: string;
+      title: string;
+      priority: TaskPriority;
+      needs_human_reason: string | null;
+      updated_at: string;
+    }>();
 
   const items = (results ?? []).map((r) => ({
     id: r.id,
     board_id: r.board_id,
+    board_name: r.board_name,
     title: r.title,
+    priority: r.priority,
     needs_human_reason: r.needs_human_reason,
     updated_at: r.updated_at,
   }));

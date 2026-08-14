@@ -341,7 +341,9 @@ export async function acceptInvite(token: string): Promise<{ workspace: Workspac
 export interface NeedsHumanItem {
   id: string;
   board_id: string;
+  board_name: string;
   title: string;
+  priority: TaskPriority;
   needs_human_reason: string | null;
   updated_at: string;
 }
