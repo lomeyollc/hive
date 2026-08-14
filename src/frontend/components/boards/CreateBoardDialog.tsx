@@ -25,7 +25,13 @@ function slugify(name: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
-export function CreateBoardDialog({ onCreated }: { onCreated: (board: Board) => void }) {
+export function CreateBoardDialog({
+  workspaceId,
+  onCreated,
+}: {
+  workspaceId: string;
+  onCreated: (board: Board) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [name, setName] = useState("");
@@ -45,7 +51,12 @@ export function CreateBoardDialog({ onCreated }: { onCreated: (board: Board) => 
     }
     setSubmitting(true);
     try {
-      const board = await createBoard({ id, name: name.trim(), description: description.trim() || undefined });
+      const board = await createBoard({
+        id,
+        name: name.trim(),
+        description: description.trim() || undefined,
+        workspace_id: workspaceId,
+      });
       toast.success("Board created");
       onCreated(board);
       reset();

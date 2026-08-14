@@ -50,6 +50,8 @@ import type {
   Task,
   TaskPriority,
   TaskStatus,
+  Workspace,
+  WorkspaceMember,
 } from "./types";
 
 export class ApiError extends Error {
@@ -158,7 +160,12 @@ export async function getBoard(slug: string): Promise<Board> {
   return data.board;
 }
 
-export async function createBoard(input: { id: string; name: string; description?: string }): Promise<Board> {
+export async function createBoard(input: {
+  id: string;
+  name: string;
+  description?: string;
+  workspace_id: string;
+}): Promise<Board> {
   const data = await request<{ board: Board }>("/api/boards", {
     method: "POST",
     body: JSON.stringify(input),
@@ -278,6 +285,53 @@ export async function createComment(slug: string, taskId: string, body: string):
     { method: "POST", body: JSON.stringify({ body }) },
   );
   return data.comment;
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const data = await request<{ workspaces: Workspace[] }>("/api/workspaces");
+  return data.workspaces;
+}
+
+export async function createWorkspace(input: { id: string; name: string }): Promise<Workspace> {
+  const data = await request<{ workspace: Workspace }>("/api/workspaces", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.workspace;
+}
+
+export async function listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+  const data = await request<{ members: WorkspaceMember[] }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/members`,
+  );
+  return data.members;
+}
+
+export async function createInvite(workspaceId: string, email: string): Promise<{ invite_url: string }> {
+  return request<{ invite_url: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** PUBLIC — no session required, used by the accept-invite landing page
+ *  before the user has signed in. Does not go through `request()` since
+ *  that helper doesn't distinguish "no session" from "this call needs none". */
+export async function getInvite(token: string): Promise<{ email: string; status: string; workspace_name: string }> {
+  const res = await fetch(`/api/invites/${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function acceptInvite(token: string): Promise<{ workspace: Workspace }> {
+  return request<{ workspace: Workspace }>(`/api/invites/${encodeURIComponent(token)}/accept`, { method: "POST" });
 }
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,14 @@ interface TokenInfoResponse {
  * safer for a public open-source project, we also support an explicit
  * allowlist: set ALLOWED_EMAILS (comma-separated) and only those emails can
  * sign in. Leave it unset to allow any verified Google account.
+ *
+ * Workspaces add a second, additive path in: an email with ANY
+ * workspace_members row (invited or active) may also sign in, even if it's
+ * not on ALLOWED_EMAILS — otherwise an invited teammate could never get far
+ * enough to accept their invite. Signing in is not the same as having
+ * access to anything: workspace membership status ('invited' vs 'active')
+ * is what actually gates board visibility, checked separately in
+ * src/worker/api/routes.ts.
  */
 export async function verifyGoogleIdToken(idToken: string, env: Env): Promise<GoogleVerifiedUser> {
   if (!idToken) {
@@ -64,7 +72,12 @@ export async function verifyGoogleIdToken(idToken: string, env: Env): Promise<Go
     .filter(Boolean);
 
   if (allowlist.length > 0 && !allowlist.includes(email)) {
-    throw new AuthError(403, "This email is not on the allowlist for this Hive instance");
+    const invited = await env.DB.prepare(`SELECT 1 FROM workspace_members WHERE email = ? LIMIT 1`)
+      .bind(email)
+      .first();
+    if (!invited) {
+      throw new AuthError(403, "This email is not on the allowlist for this Hive instance");
+    }
   }
 
   return { email };

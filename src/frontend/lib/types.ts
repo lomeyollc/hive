@@ -53,9 +53,29 @@ export interface Board {
   name: string;
   description: string | null;
   created_at: string;
+  workspace_id: string | null;
   /** Denormalized from D1's tasks_index — may be absent while the index
    *  catches up; api.ts / BoardListPage treat a missing value as zeros. */
   task_counts?: TaskCounts;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  email: string;
+  role: "owner" | "member";
+  status: "invited" | "active";
+  invited_by: string | null;
+  invited_at: string;
+  accepted_at: string | null;
+  /** Only present while status is "invited" — the accept link to hand the
+   *  invitee, since no email is actually sent. */
+  invite_url: string | null;
 }
 
 /** Matches src/worker/auth/routes.ts, which only surfaces `email` today. */

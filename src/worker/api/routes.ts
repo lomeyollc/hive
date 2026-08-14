@@ -41,9 +41,24 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *          first. Powers the nav badge; the same signal that drives the
  *          Telegram ping/digest (BoardDO.#notifyNeedsHuman, index.ts
  *          scheduled()), read back for in-app visibility.
+ *   GET    /api/invites/:token                   PUBLIC — no session required
+ *          (an invited user hasn't logged in yet). -> { workspace_name, email, status }
+ *   POST   /api/invites/:token/accept             session-gated. The session
+ *          email must match the invite's email (case-insensitive) — activates
+ *          the membership. -> { workspace }
+ *   GET    /api/workspaces                       -> { workspaces: Workspace[] }
+ *          Only workspaces the caller is an ACTIVE member of.
+ *   POST   /api/workspaces        { id, name }    -> { workspace } (201)
+ *          Creator becomes an active 'owner' member automatically.
+ *   GET    /api/workspaces/:id/members            -> { members: Member[] }
+ *   POST   /api/workspaces/:id/invites { email }   -> { invite_url } (201)
+ *          Creates an 'invited' member row + token. No email is sent — the
+ *          caller is responsible for handing the URL to the invitee.
  *   GET    /api/boards                          -> { boards: Board[] }
- *   POST   /api/boards            { id, name, description? }
+ *          Scoped to workspaces the caller is an active member of.
+ *   POST   /api/boards            { id, name, description?, workspace_id }
  *                                                -> { board: Board } (201)
+ *          workspace_id is required; caller must be an active member of it.
  *   GET    /api/boards/:slug                     -> { board: Board }
  *   PATCH  /api/boards/:slug      { name?, description? }
  *                                                -> { board: Board }
@@ -70,29 +85,56 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *
  */
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
-  const session = await requireSession(request, env);
-  if (!session) {
-    return json({ error: "Not authenticated" }, 401);
-  }
-
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter(Boolean); // "/api/boards/:slug/tasks" -> ["api","boards",":slug","tasks"]
 
   try {
+    // /api/invites/:token — PUBLIC, checked before the session gate below:
+    // an invited user hasn't logged in yet, so they can't have a session.
+    if (parts.length === 3 && parts[1] === "invites" && request.method === "GET") {
+      return await getInvite(env, parts[2]);
+    }
+
+    const session = await requireSession(request, env);
+    if (!session) {
+      return json({ error: "Not authenticated" }, 401);
+    }
+
+    // /api/invites/:token/accept
+    if (parts.length === 4 && parts[1] === "invites" && parts[3] === "accept" && request.method === "POST") {
+      return await acceptInvite(env, parts[2], session.email);
+    }
+
     // /api/needs-human — cross-board, powers the nav badge ("what's stuck on me")
     if (parts.length === 2 && parts[1] === "needs-human" && request.method === "GET") {
       return await listNeedsHuman(env);
     }
 
+    // /api/workspaces
+    if (parts.length === 2 && parts[1] === "workspaces") {
+      if (request.method === "GET") return await listWorkspaces(env, session.email);
+      if (request.method === "POST") return await createWorkspace(request, env, session.email);
+    }
+
+    // /api/workspaces/:id/members
+    if (parts.length === 4 && parts[1] === "workspaces" && parts[3] === "members" && request.method === "GET") {
+      return await listMembers(env, parts[2], session.email);
+    }
+
+    // /api/workspaces/:id/invites
+    if (parts.length === 4 && parts[1] === "workspaces" && parts[3] === "invites" && request.method === "POST") {
+      return await createInvite(request, env, parts[2], session.email);
+    }
+
     // /api/boards
     if (parts.length === 2 && parts[1] === "boards") {
-      if (request.method === "GET") return await listBoards(env);
-      if (request.method === "POST") return await createBoard(request, env);
+      if (request.method === "GET") return await listBoards(env, session.email);
+      if (request.method === "POST") return await createBoard(request, env, session.email);
     }
 
     // /api/boards/:slug
     if (parts.length === 3 && parts[1] === "boards") {
-      if (request.method === "GET") return await getBoard(env, parts[2]);
+      if (request.method === "GET") return await getBoard(env, parts[2], session.email);
       if (request.method === "PATCH") return await updateBoard(request, env, parts[2]);
       if (request.method === "DELETE") return await deleteBoard(env, parts[2]);
     }
@@ -153,6 +195,164 @@ async function listNeedsHuman(env: Env): Promise<Response> {
   return json({ count: items.length, items });
 }
 
+// ── Workspaces (D1) ───────────────────────────────────────────────────────
+//
+// A workspace is the multi-tenant boundary: boards belong to exactly one
+// workspace, and a caller only sees/acts on a board if they're an ACTIVE
+// workspace_members row for its workspace. Invitations are membership rows
+// with status 'invited' and a token; accepting flips them to 'active'. No
+// email is ever sent — the invite URL is returned to the caller (a human,
+// session-gated) to hand to the invitee by whatever channel they like.
+
+interface WorkspaceRow {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+async function isActiveMember(env: Env, workspaceId: string, email: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT 1 FROM workspace_members WHERE workspace_id = ? AND email = ? AND status = 'active' LIMIT 1`,
+  )
+    .bind(workspaceId, email)
+    .first();
+  return row !== null;
+}
+
+async function listWorkspaces(env: Env, email: string): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT w.id, w.name, w.created_at FROM workspaces w
+     JOIN workspace_members m ON m.workspace_id = w.id
+     WHERE m.email = ? AND m.status = 'active'
+     ORDER BY w.name ASC`,
+  )
+    .bind(email)
+    .all<WorkspaceRow>();
+  return json({ workspaces: results ?? [] });
+}
+
+async function createWorkspace(request: Request, env: Env, email: string): Promise<Response> {
+  const body = await readJson<{ id?: string; name?: string }>(request);
+  const id = body.id?.trim();
+  const name = body.name?.trim();
+  if (!id || !/^[a-z0-9-]+$/.test(id)) {
+    throw new ValidationError("id is required and must be lowercase letters, numbers, and hyphens only");
+  }
+  if (!name) {
+    throw new ValidationError("name is required");
+  }
+
+  const now = new Date().toISOString();
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)`).bind(id, name, now),
+      env.DB.prepare(
+        `INSERT INTO workspace_members (id, workspace_id, email, role, status, invited_by, invited_at, accepted_at)
+         VALUES (?, ?, ?, 'owner', 'active', ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), id, email, email, now, now),
+    ]);
+  } catch (error) {
+    throw new ValidationError(`could not create workspace "${id}" (does it already exist?): ${(error as Error).message}`);
+  }
+
+  return json({ workspace: { id, name, created_at: now } }, 201);
+}
+
+async function listMembers(env: Env, workspaceId: string, email: string): Promise<Response> {
+  if (!(await isActiveMember(env, workspaceId, email))) {
+    throw new NotFoundError(`workspace "${workspaceId}" not found`);
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT id, email, role, status, invited_by, invited_at, accepted_at, invite_token
+     FROM workspace_members WHERE workspace_id = ? ORDER BY invited_at ASC`,
+  )
+    .bind(workspaceId)
+    .all<{
+      id: string;
+      email: string;
+      role: string;
+      status: string;
+      invited_by: string | null;
+      invited_at: string;
+      accepted_at: string | null;
+      invite_token: string | null;
+    }>();
+
+  const members = (results ?? []).map((m) => ({
+    id: m.id,
+    email: m.email,
+    role: m.role,
+    status: m.status,
+    invited_by: m.invited_by,
+    invited_at: m.invited_at,
+    accepted_at: m.accepted_at,
+    // Only surface the invite link for members still pending — an already
+    // active member's token is spent and shouldn't be re-shown as live.
+    invite_url: m.status === "invited" && m.invite_token ? `${env.APP_URL ?? ""}/invites/${m.invite_token}` : null,
+  }));
+  return json({ members });
+}
+
+async function createInvite(request: Request, env: Env, workspaceId: string, email: string): Promise<Response> {
+  if (!(await isActiveMember(env, workspaceId, email))) {
+    throw new NotFoundError(`workspace "${workspaceId}" not found`);
+  }
+  const body = await readJson<{ email?: string }>(request);
+  const inviteEmail = body.email?.trim().toLowerCase();
+  if (!inviteEmail || !inviteEmail.includes("@")) {
+    throw new ValidationError("a valid email is required");
+  }
+
+  const token = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO workspace_members (id, workspace_id, email, role, status, invite_token, invited_by, invited_at)
+     VALUES (?, ?, ?, 'member', 'invited', ?, ?, ?)`,
+  )
+    .bind(crypto.randomUUID(), workspaceId, inviteEmail, token, email, now)
+    .run();
+
+  return json({ invite_url: `${env.APP_URL ?? ""}/invites/${token}` }, 201);
+}
+
+async function getInvite(env: Env, token: string): Promise<Response> {
+  const row = await env.DB.prepare(
+    `SELECT m.email, m.status, w.name AS workspace_name
+     FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+     WHERE m.invite_token = ?`,
+  )
+    .bind(token)
+    .first<{ email: string; status: string; workspace_name: string }>();
+  if (!row) {
+    throw new NotFoundError("invite not found — it may have already been used or the link is wrong");
+  }
+  return json({ email: row.email, status: row.status, workspace_name: row.workspace_name });
+}
+
+async function acceptInvite(env: Env, token: string, sessionEmail: string): Promise<Response> {
+  const row = await env.DB.prepare(
+    `SELECT m.id, m.email, m.workspace_id, m.status, w.name AS workspace_name
+     FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+     WHERE m.invite_token = ?`,
+  )
+    .bind(token)
+    .first<{ id: string; email: string; workspace_id: string; status: string; workspace_name: string }>();
+  if (!row) {
+    throw new NotFoundError("invite not found — it may have already been used or the link is wrong");
+  }
+  if (row.email !== sessionEmail) {
+    throw new ValidationError(`this invite was sent to ${row.email} — signed in as ${sessionEmail}`);
+  }
+
+  if (row.status !== "active") {
+    await env.DB.prepare(`UPDATE workspace_members SET status = 'active', accepted_at = ? WHERE id = ?`)
+      .bind(new Date().toISOString(), row.id)
+      .run();
+  }
+
+  return json({ workspace: { id: row.workspace_id, name: row.workspace_name } });
+}
+
 // ── Boards (D1) ────────────────────────────────────────────────────────
 
 interface BoardRow {
@@ -160,11 +360,19 @@ interface BoardRow {
   name: string;
   description: string | null;
   created_at: string;
+  workspace_id: string | null;
 }
 
-async function listBoards(env: Env): Promise<Response> {
+async function listBoards(env: Env, email: string): Promise<Response> {
   const [{ results: boardRows }, { results: countRows }] = await Promise.all([
-    env.DB.prepare(`SELECT id, name, description, created_at FROM boards ORDER BY name ASC`).all<BoardRow>(),
+    env.DB.prepare(
+      `SELECT b.id, b.name, b.description, b.created_at, b.workspace_id FROM boards b
+       JOIN workspace_members m ON m.workspace_id = b.workspace_id
+       WHERE m.email = ? AND m.status = 'active'
+       ORDER BY b.name ASC`,
+    )
+      .bind(email)
+      .all<BoardRow>(),
     env.DB.prepare(`SELECT board_id, status, COUNT(*) AS count FROM tasks_index GROUP BY board_id, status`).all<{
       board_id: string;
       status: TaskStatus;
@@ -183,11 +391,13 @@ async function listBoards(env: Env): Promise<Response> {
   return json({ boards });
 }
 
-async function getBoard(env: Env, slug: string): Promise<Response> {
-  const row = await env.DB.prepare(`SELECT id, name, description, created_at FROM boards WHERE id = ?`)
+async function getBoard(env: Env, slug: string, email: string): Promise<Response> {
+  const row = await env.DB.prepare(
+    `SELECT id, name, description, created_at, workspace_id FROM boards WHERE id = ?`,
+  )
     .bind(slug)
     .first<BoardRow>();
-  if (!row) {
+  if (!row || !row.workspace_id || !(await isActiveMember(env, row.workspace_id, email))) {
     throw new NotFoundError(`board "${slug}" not found`);
   }
 
@@ -203,21 +413,30 @@ async function getBoard(env: Env, slug: string): Promise<Response> {
   return json({ board: boardToWire(row, counts) });
 }
 
-async function createBoard(request: Request, env: Env): Promise<Response> {
-  const body = await readJson<{ id?: string; name?: string; description?: string }>(request);
+async function createBoard(request: Request, env: Env, email: string): Promise<Response> {
+  const body = await readJson<{ id?: string; name?: string; description?: string; workspace_id?: string }>(request);
   const id = body.id?.trim();
   const name = body.name?.trim();
+  const workspaceId = body.workspace_id?.trim();
   if (!id || !/^[a-z0-9-]+$/.test(id)) {
     throw new ValidationError("id is required and must be lowercase letters, numbers, and hyphens only");
   }
   if (!name) {
     throw new ValidationError("name is required");
   }
+  if (!workspaceId) {
+    throw new ValidationError("workspace_id is required");
+  }
+  if (!(await isActiveMember(env, workspaceId, email))) {
+    throw new ValidationError(`not a member of workspace "${workspaceId}"`);
+  }
 
   const createdAt = new Date().toISOString();
   try {
-    await env.DB.prepare(`INSERT INTO boards (id, name, description, created_at) VALUES (?, ?, ?, ?)`)
-      .bind(id, name, body.description?.trim() || null, createdAt)
+    await env.DB.prepare(
+      `INSERT INTO boards (id, name, description, created_at, workspace_id) VALUES (?, ?, ?, ?, ?)`,
+    )
+      .bind(id, name, body.description?.trim() || null, createdAt, workspaceId)
       .run();
   } catch (error) {
     // D1's unique constraint on the primary key is the only realistic way
@@ -225,12 +444,25 @@ async function createBoard(request: Request, env: Env): Promise<Response> {
     throw new ValidationError(`could not create board "${id}" (does it already exist?): ${(error as Error).message}`);
   }
 
-  return json({ board: boardToWire({ id, name, description: body.description ?? null, created_at: createdAt }) }, 201);
+  return json(
+    {
+      board: boardToWire({
+        id,
+        name,
+        description: body.description ?? null,
+        created_at: createdAt,
+        workspace_id: workspaceId,
+      }),
+    },
+    201,
+  );
 }
 
 async function updateBoard(request: Request, env: Env, slug: string): Promise<Response> {
   const body = await readJson<{ name?: string; description?: string }>(request);
-  const existing = await env.DB.prepare(`SELECT id, name, description, created_at FROM boards WHERE id = ?`)
+  const existing = await env.DB.prepare(
+    `SELECT id, name, description, created_at, workspace_id FROM boards WHERE id = ?`,
+  )
     .bind(slug)
     .first<BoardRow>();
   if (!existing) {
@@ -252,6 +484,7 @@ async function updateBoard(request: Request, env: Env, slug: string): Promise<Re
       name: name ?? existing.name,
       description: body.description !== undefined ? body.description.trim() || null : existing.description,
       created_at: existing.created_at,
+      workspace_id: existing.workspace_id,
     }),
   });
 }
@@ -283,6 +516,7 @@ function boardToWire(row: BoardRow, counts?: Record<TaskStatus, number>) {
     name: row.name,
     description: row.description,
     created_at: row.created_at,
+    workspace_id: row.workspace_id,
     task_counts: counts,
   };
 }
