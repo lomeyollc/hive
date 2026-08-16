@@ -282,6 +282,15 @@ export class BoardDO extends DurableObject<Env> {
       `);
       sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (5, ?)", new Date().toISOString());
     }
+
+    if (version < 6) {
+      // Archive: cold storage as a nullable timestamp, not a board column
+      // (see Task.archivedAt in types.ts for why). A plain ADD COLUMN — no
+      // table rebuild needed, since nothing about it is constrained.
+      sql.exec(`ALTER TABLE tasks ADD COLUMN archived_at TEXT;`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived_at);`);
+      sql.exec("INSERT INTO _schema_migrations (id, applied_at) VALUES (6, ?)", new Date().toISOString());
+    }
   }
 
   /** The board slug this DO instance owns. Requires the DO to have been created via `getByName(slug)`. */
@@ -464,14 +473,15 @@ export class BoardDO extends DurableObject<Env> {
       version: 0,
       needs_human: input.needsHuman ? 1 : 0,
       needs_human_reason: input.needsHuman ? (input.needsHumanReason ?? null) : null,
+      archived_at: null,
       parent_task_id: input.parentTaskId ?? null,
       recurrence: input.recurrence ?? null,
     };
 
     this.ctx.storage.sql.exec(
       `INSERT INTO tasks
-        (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, created_by, claimed_by, version, needs_human, needs_human_reason, parent_task_id, recurrence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, created_by, claimed_by, version, needs_human, needs_human_reason, archived_at, parent_task_id, recurrence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.board_id,
       row.title,
@@ -488,6 +498,7 @@ export class BoardDO extends DurableObject<Env> {
       row.version,
       row.needs_human,
       row.needs_human_reason,
+      row.archived_at,
       row.parent_task_id,
       row.recurrence,
     );
@@ -530,6 +541,14 @@ export class BoardDO extends DurableObject<Env> {
       clauses.push("parent_task_id = ?");
       params.push(filter.parentTaskId);
     }
+    // Archived tasks are invisible unless explicitly asked for — the whole
+    // value of archiving is that it stops competing for attention, so the
+    // default has to be exclusion, not an opt-out.
+    if (filter.archived === "only") {
+      clauses.push("archived_at IS NOT NULL");
+    } else if (filter.archived !== "all") {
+      clauses.push("archived_at IS NULL");
+    }
 
     const rows = this.ctx.storage.sql
       .exec<TaskRow>(
@@ -538,6 +557,24 @@ export class BoardDO extends DurableObject<Env> {
       )
       .toArray();
     return rows.map(toTask);
+  }
+
+  /**
+   * Re-pushes every task this board owns into D1's `tasks_index`, and
+   * returns how many rows were queued. The index is a fire-and-forget
+   * mirror (see #syncTaskToIndex) — a D1 outage, or a column added to
+   * tasks_index after the fact, leaves it stale with no way back. This is
+   * that way back: the DO's own SQLite is authoritative, so replaying it is
+   * always safe and always converges.
+   */
+  resyncIndex(): number {
+    const rows = this.ctx.storage.sql
+      .exec<TaskRow>("SELECT * FROM tasks WHERE board_id = ?", this.boardId)
+      .toArray();
+    for (const row of rows) {
+      this.#syncTaskToIndex(toTask(row));
+    }
+    return rows.length;
   }
 
   updateTask(id: string, patch: UpdateTaskInput): Task {
@@ -570,6 +607,7 @@ export class BoardDO extends DurableObject<Env> {
       needs_human: patch.needsHuman !== undefined ? (patch.needsHuman ? 1 : 0) : existing.needs_human,
       needs_human_reason:
         patch.needsHumanReason !== undefined ? patch.needsHumanReason : existing.needs_human_reason,
+      archived_at: patch.archivedAt !== undefined ? patch.archivedAt : existing.archived_at,
       parent_task_id: patch.parentTaskId !== undefined ? patch.parentTaskId : existing.parent_task_id,
       recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
     };
@@ -578,7 +616,7 @@ export class BoardDO extends DurableObject<Env> {
       `UPDATE tasks SET
         title = ?, description = ?, status = ?, priority = ?, assignee = ?,
         labels = ?, due_date = ?, claimed_by = ?, updated_at = ?, version = ?,
-        needs_human = ?, needs_human_reason = ?, parent_task_id = ?, recurrence = ?
+        needs_human = ?, needs_human_reason = ?, archived_at = ?, parent_task_id = ?, recurrence = ?
        WHERE id = ?`,
       next.title,
       next.description,
@@ -592,6 +630,7 @@ export class BoardDO extends DurableObject<Env> {
       next.version,
       next.needs_human,
       next.needs_human_reason,
+      next.archived_at,
       next.parent_task_id,
       next.recurrence,
       id,
@@ -663,7 +702,10 @@ export class BoardDO extends DurableObject<Env> {
   claimNextTask(filter: ClaimNextTaskFilter = {}, claimedBy?: string): Task | null {
     const openColumnId = this.#openColumnId();
     const activeColumnId = this.#activeColumnId();
-    const clauses: string[] = ["board_id = ?", "status = ?", "claimed_by IS NULL"];
+    // `archived_at IS NULL` matters here as much as anywhere: an archived
+    // task is work the human decided not to do, so no agent should ever be
+    // handed one to work on.
+    const clauses: string[] = ["board_id = ?", "status = ?", "claimed_by IS NULL", "archived_at IS NULL"];
     const params: SqlBindable[] = [this.boardId, openColumnId];
 
     if (filter.assignee) {
@@ -895,13 +937,15 @@ export class BoardDO extends DurableObject<Env> {
    */
   #syncTaskToIndex(task: Task): void {
     const query = this.env.DB.prepare(
-      `INSERT INTO tasks_index (id, board_id, title, description, status, priority, assignee, labels, due_date, updated_at, needs_human, needs_human_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO tasks_index (id, board_id, title, description, status, priority, assignee, labels, due_date, created_at, updated_at, needs_human, needs_human_reason, archived_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          board_id = excluded.board_id, title = excluded.title, description = excluded.description,
          status = excluded.status, priority = excluded.priority, assignee = excluded.assignee,
-         labels = excluded.labels, due_date = excluded.due_date, updated_at = excluded.updated_at,
-         needs_human = excluded.needs_human, needs_human_reason = excluded.needs_human_reason`,
+         labels = excluded.labels, due_date = excluded.due_date,
+         created_at = excluded.created_at, updated_at = excluded.updated_at,
+         needs_human = excluded.needs_human, needs_human_reason = excluded.needs_human_reason,
+         archived_at = excluded.archived_at`,
     ).bind(
       task.id,
       task.boardId,
@@ -912,9 +956,11 @@ export class BoardDO extends DurableObject<Env> {
       task.assignee,
       JSON.stringify(task.labels),
       task.dueDate,
+      task.createdAt,
       task.updatedAt,
       task.needsHuman ? 1 : 0,
       task.needsHumanReason,
+      task.archivedAt,
     );
     this.ctx.waitUntil(
       query.run().catch((error) => {
@@ -1042,6 +1088,7 @@ interface TaskRow extends Record<string, SqlStorageValue> {
   version: number;
   needs_human: number;
   needs_human_reason: string | null;
+  archived_at: string | null;
   parent_task_id: string | null;
   recurrence: string | null;
 }
@@ -1095,6 +1142,7 @@ function toTask(row: TaskRow): Task {
     version: row.version,
     needsHuman: row.needs_human === 1,
     needsHumanReason: row.needs_human_reason,
+    archivedAt: row.archived_at,
     parentTaskId: row.parent_task_id,
     recurrence: row.recurrence as RecurrenceInterval | null,
   };

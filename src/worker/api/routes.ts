@@ -56,6 +56,21 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *   POST   /api/workspaces/:id/invites { email }   -> { invite_url } (201)
  *          Creates an 'invited' member row + token. No email is sent — the
  *          caller is responsible for handing the URL to the invitee.
+ *   GET    /api/tasks  ?board=&priority=&status=&label=&assignee=&needs_human=
+ *                      &archived=&stale_days=&q=&sort=&limit=
+ *          -> { count, items: [...] }
+ *          The cross-board flat list behind /all — every task in every board
+ *          the caller can see, filtered server-side. board/priority/status/
+ *          label are repeatable and OR within themselves, AND across. Reads
+ *          tasks_index only; never opens a Durable Object. Archived tasks are
+ *          excluded unless archived=only|all.
+ *   PATCH  /api/tasks/bulk  { items: [{board_id, id}], patch: {...} }
+ *          -> { updated_count, failed_count, updated, failed }
+ *          One patch applied to up to 200 tasks across any number of boards.
+ *          Partial failure is reported per task, not rolled back.
+ *   POST   /api/boards/:slug/resync              -> { ok: true, synced: N }
+ *          Replays the board's tasks into tasks_index. Repair tool for the
+ *          fire-and-forget mirror; safe to run any time.
  *   GET    /api/activity  ?board=&type=&since=&limit=
  *          -> { items: [...] }
  *          Cross-board (workspace-scoped) event log — task created/updated/
@@ -135,6 +150,16 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       return await listNeedsHuman(env, session.email);
     }
 
+    // /api/tasks — the cross-board flat list behind /all
+    if (parts.length === 2 && parts[1] === "tasks" && request.method === "GET") {
+      return await listAllTasks(env, session.email, url.searchParams);
+    }
+
+    // /api/tasks/bulk — one patch applied to many tasks across many boards
+    if (parts.length === 3 && parts[1] === "tasks" && parts[2] === "bulk" && request.method === "PATCH") {
+      return await bulkUpdateTasks(request, env, session.email);
+    }
+
     // /api/activity — cross-board event feed. ?board=&type=&since=&limit=
     if (parts.length === 2 && parts[1] === "activity" && request.method === "GET") {
       return await listActivity(env, session.email, url.searchParams);
@@ -185,6 +210,11 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
       if (request.method === "GET") return await getBoard(env, parts[2], session.email);
       if (request.method === "PATCH") return await updateBoard(request, env, parts[2]);
       if (request.method === "DELETE") return await deleteBoard(env, parts[2]);
+    }
+
+    // /api/boards/:slug/resync — repair this board's D1 index from the DO
+    if (parts.length === 4 && parts[1] === "boards" && parts[3] === "resync" && request.method === "POST") {
+      return await resyncBoardIndex(env, parts[2]);
     }
 
     // /api/boards/:slug/tasks
@@ -279,6 +309,239 @@ async function listNeedsHuman(env: Env, email: string): Promise<Response> {
     updated_at: r.updated_at,
   }));
   return json({ count: items.length, items });
+}
+
+/**
+ * The cross-board task list behind /all — every task in every board the
+ * caller can see, as one flat list, filtered server-side.
+ *
+ * Reads `tasks_index` only. That is the whole reason this can exist at a
+ * sensible cost: task state lives in one Durable Object per board, so a
+ * genuinely cross-board query would otherwise mean fanning out to N DOs and
+ * merging. The D1 mirror already carries every field this view filters or
+ * sorts on, so the fan-out never happens. It is a read index, so it can lag
+ * a write by a moment — acceptable for a list view, which is why every
+ * mutation still goes to the owning DO.
+ *
+ * Query params (all optional, AND'd):
+ *   board       repeatable — board slug(s)
+ *   priority    repeatable — low|normal|high|urgent
+ *   status      repeatable — column id (only meaningful within a board, but
+ *                            the default ids are shared across boards)
+ *   label       repeatable — matches tasks carrying the label
+ *   assignee    exact email, or the literal "none" for unassigned
+ *   needs_human "1" to show only flagged tasks
+ *   archived    exclude (default) | only | all
+ *   stale_days  only tasks untouched for at least N days
+ *   q           substring over title/description
+ *   sort        priority (default) | updated | created | due
+ *   limit       default 500, capped at 1000
+ */
+async function listAllTasks(env: Env, email: string, params: URLSearchParams): Promise<Response> {
+  const clauses = ["m.email = ?", "m.status = 'active'"];
+  const binds: (string | number)[] = [email];
+
+  const inClause = (column: string, values: string[]) => {
+    if (values.length === 0) return;
+    clauses.push(`${column} IN (${values.map(() => "?").join(",")})`);
+    binds.push(...values);
+  };
+  inClause("t.board_id", params.getAll("board"));
+  inClause("t.priority", params.getAll("priority"));
+  inClause("t.status", params.getAll("status"));
+
+  for (const label of params.getAll("label")) {
+    // Same bracketed-substring match BoardDO.listTasks uses on the JSON
+    // array TEXT column — precise for ordinary label text.
+    clauses.push("t.labels LIKE ?");
+    binds.push(`%"${label}"%`);
+  }
+
+  const assignee = params.get("assignee");
+  if (assignee === "none") {
+    clauses.push("t.assignee IS NULL");
+  } else if (assignee) {
+    clauses.push("t.assignee = ?");
+    binds.push(assignee);
+  }
+
+  if (params.get("needs_human") === "1") {
+    clauses.push("t.needs_human = 1");
+  }
+
+  const archived = params.get("archived");
+  if (archived === "only") {
+    clauses.push("t.archived_at IS NOT NULL");
+  } else if (archived !== "all") {
+    clauses.push("t.archived_at IS NULL");
+  }
+
+  const staleDays = Number(params.get("stale_days"));
+  if (Number.isFinite(staleDays) && staleDays > 0) {
+    clauses.push("t.updated_at < ?");
+    binds.push(new Date(Date.now() - staleDays * 86_400_000).toISOString());
+  }
+
+  const q = params.get("q")?.trim();
+  if (q) {
+    clauses.push("(t.title LIKE ? OR t.description LIKE ?)");
+    binds.push(`%${q}%`, `%${q}%`);
+  }
+
+  // Priority is the default sort because this list exists to answer "what do
+  // I do next", and an allowlist (never the raw param) keeps it injection-safe.
+  const ORDER_BY: Record<string, string> = {
+    priority:
+      "CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END ASC, t.updated_at DESC",
+    updated: "t.updated_at DESC",
+    created: "COALESCE(t.created_at, t.updated_at) DESC",
+    due: "t.due_date IS NULL ASC, t.due_date ASC",
+  };
+  const orderBy = ORDER_BY[params.get("sort") ?? "priority"] ?? ORDER_BY.priority;
+
+  const limit = Math.min(Number(params.get("limit")) || 500, 1000);
+  binds.push(limit);
+
+  const { results } = await env.DB.prepare(
+    `SELECT t.id, t.board_id, b.name AS board_name, t.title, t.description, t.status,
+            t.priority, t.assignee, t.labels, t.due_date,
+            COALESCE(t.created_at, t.updated_at) AS created_at, t.updated_at,
+            t.needs_human, t.needs_human_reason, t.archived_at
+     FROM tasks_index t
+     JOIN boards b ON b.id = t.board_id
+     JOIN workspace_members m ON m.workspace_id = b.workspace_id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY ${orderBy}
+     LIMIT ?`,
+  )
+    .bind(...binds)
+    .all<{
+      id: string;
+      board_id: string;
+      board_name: string;
+      title: string;
+      description: string | null;
+      status: TaskStatus;
+      priority: TaskPriority;
+      assignee: string | null;
+      labels: string | null;
+      due_date: string | null;
+      created_at: string;
+      updated_at: string;
+      needs_human: number;
+      needs_human_reason: string | null;
+      archived_at: string | null;
+    }>();
+
+  const items = (results ?? []).map((r) => ({
+    ...r,
+    // tasks_index stores labels as JSON TEXT; every other task shape on the
+    // wire carries a real array, so normalize here rather than in the UI.
+    labels: parseLabels(r.labels),
+    needs_human: r.needs_human === 1,
+  }));
+  return json({ count: items.length, items });
+}
+
+function parseLabels(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Applies one patch to many tasks across many boards in a single request —
+ * what makes a 60-task backlog cleanable in a sitting instead of 60 page
+ * loads.
+ *
+ * Tasks are grouped by board so each board's Durable Object is fetched once
+ * and its updates run sequentially against it (a DO is single-threaded, so
+ * firing them concurrently at the same stub buys nothing); different boards
+ * do run in parallel. Every write still goes through BoardDO.updateTask, so
+ * validation, versioning, broadcast, index sync and activity logging all
+ * behave exactly as they do for a single edit.
+ *
+ * Partial failure is reported, never hidden: one bad task id fails that one
+ * task and the response lists it, rather than rolling back the rest. There
+ * is no cross-board transaction to roll back to.
+ */
+async function bulkUpdateTasks(request: Request, env: Env, email: string): Promise<Response> {
+  const body = await readJson<{
+    items?: { board_id?: string; id?: string }[];
+    patch?: WireUpdateTaskInput;
+  }>(request);
+
+  const items = body.items ?? [];
+  if (items.length === 0) {
+    throw new ValidationError("items is required and must not be empty");
+  }
+  if (items.length > 200) {
+    throw new ValidationError("items is capped at 200 per request");
+  }
+  const patch = body.patch ?? {};
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError("patch is required and must not be empty");
+  }
+
+  const byBoard = new Map<string, string[]>();
+  for (const item of items) {
+    if (!item.board_id || !item.id) {
+      throw new ValidationError("every item needs board_id and id");
+    }
+    const ids = byBoard.get(item.board_id) ?? [];
+    ids.push(item.id);
+    byBoard.set(item.board_id, ids);
+  }
+
+  // Membership is checked once per board, before any write — without this a
+  // caller could patch tasks on a board they can't otherwise touch just by
+  // naming its slug here.
+  await Promise.all(Array.from(byBoard.keys()).map((slug) => requireBoardWorkspace(env, slug, email)));
+
+  const doPatch: DoUpdateTaskInput = {
+    status: patch.status,
+    priority: patch.priority,
+    assignee: patch.assignee,
+    labels: patch.labels,
+    dueDate: patch.due_date,
+    needsHuman: patch.needs_human,
+    needsHumanReason: patch.needs_human_reason,
+    archivedAt: archivedAtFromWire(patch.archived),
+  };
+
+  const updated: ReturnType<typeof taskToWire>[] = [];
+  const failed: { id: string; board_id: string; error: string }[] = [];
+
+  await Promise.all(
+    Array.from(byBoard.entries()).map(async ([slug, ids]) => {
+      const stub = env.BOARD_DO.getByName(slug);
+      for (const id of ids) {
+        try {
+          updated.push(taskToWire(await stub.updateTask(id, doPatch)));
+        } catch (error) {
+          failed.push({ id, board_id: slug, error: (error as Error).message });
+        }
+      }
+    }),
+  );
+
+  return json({ updated_count: updated.length, failed_count: failed.length, updated, failed });
+}
+
+/**
+ * Replays a board's tasks into D1's `tasks_index`. The index is a
+ * fire-and-forget mirror, so a D1 hiccup — or a column added to it after
+ * rows already existed — leaves it stale with no self-healing path. This is
+ * the repair. Safe to run any time: the DO is authoritative, so replaying it
+ * only ever moves the index toward the truth.
+ */
+async function resyncBoardIndex(env: Env, slug: string): Promise<Response> {
+  const synced = await env.BOARD_DO.getByName(slug).resyncIndex();
+  return json({ ok: true, synced });
 }
 
 async function listActivity(env: Env, email: string, params: URLSearchParams): Promise<Response> {
@@ -787,6 +1050,7 @@ async function updateTask(request: Request, env: Env, slug: string, taskId: stri
     dueDate: body.due_date,
     needsHuman: body.needs_human,
     needsHumanReason: body.needs_human_reason,
+    archivedAt: archivedAtFromWire(body.archived),
     parentTaskId: body.parent_task_id,
     recurrence: body.recurrence,
   };
@@ -826,6 +1090,7 @@ function taskToWire(task: DoTask) {
     version: task.version,
     needs_human: task.needsHuman,
     needs_human_reason: task.needsHumanReason,
+    archived_at: task.archivedAt,
     parent_task_id: task.parentTaskId,
     recurrence: task.recurrence,
   };
@@ -855,8 +1120,17 @@ interface WireUpdateTaskInput {
   due_date?: string;
   needs_human?: boolean;
   needs_human_reason?: string;
+  /** Callers say "archive it" / "restore it"; the timestamp is the server's
+   *  business, so the wire carries a boolean and archivedAtFromWire maps it. */
+  archived?: boolean;
   parent_task_id?: string | null;
   recurrence?: RecurrenceInterval | null;
+}
+
+/** `true` -> now, `false` -> null (restore), `undefined` -> leave unchanged. */
+function archivedAtFromWire(archived: boolean | undefined): string | null | undefined {
+  if (archived === undefined) return undefined;
+  return archived ? new Date().toISOString() : null;
 }
 
 // ── Comments (BoardDO RPC) ────────────────────────────────────────────────

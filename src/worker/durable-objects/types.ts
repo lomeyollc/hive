@@ -70,6 +70,17 @@ export interface Task {
    */
   needsHuman: boolean;
   needsHumanReason: string | null;
+  /**
+   * Cold storage. A task with `archivedAt` set is excluded from every
+   * default view, count and agent listing — it still exists and unarchives
+   * in one call, but it stops competing for attention. Deliberately a
+   * timestamp field rather than a board column: a column would have to be
+   * created on every board, would pollute the column list and the count
+   * badges, and would force a task to give up its real status to be
+   * archived. Orthogonal to status, so anything can be archived from
+   * anywhere.
+   */
+  archivedAt: string | null;
   /** Another task's id in the same board, if this is a sub-task of it. */
   parentTaskId: string | null;
   /** When set, completing this task (status -> "done") spawns the next
@@ -113,6 +124,9 @@ export interface UpdateTaskInput {
   claimedBy?: string | null;
   needsHuman?: boolean;
   needsHumanReason?: string | null;
+  /** ISO timestamp to archive, `null` to restore. Callers that only know
+   *  "archive it" should pass `new Date().toISOString()`. */
+  archivedAt?: string | null;
   parentTaskId?: string | null;
   recurrence?: RecurrenceInterval | null;
 }
@@ -127,6 +141,12 @@ export interface ListTasksFilter {
    *  frontend derives sub-tasks client-side from the already-loaded list,
    *  so this exists mainly for MCP/agent callers. */
   parentTaskId?: string;
+  /**
+   * Archived tasks are hidden by default everywhere — that is the whole
+   * point of archiving. Pass "only" to list the archive itself, "all" to
+   * see both. Omitted/"exclude" is the default.
+   */
+  archived?: "exclude" | "only" | "all";
 }
 
 /** Filter for claim_next_task — narrows which unclaimed open task gets picked, all fields optional/AND'd. */

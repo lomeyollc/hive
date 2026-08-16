@@ -65,6 +65,17 @@ async function requireBoardAccess(env: McpEnv, token: AuthedToken, board: string
   }
 }
 
+/** tasks_index stores labels as JSON TEXT; every task shape agents see carries a real array. */
+function parseLabels(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Identity string recorded as `createdBy` / `claimedBy` for agent-driven writes. */
 function actorFor(token: AuthedToken): string {
   return token.name ? `agent:${token.name}` : `agent:${token.id}`;
@@ -186,6 +197,14 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
             "Set true when stuck and need a human decision (pings Telegram once), or false to clear/resolve it.",
           ),
         needs_human_reason: z.string().optional().describe("Why you're stuck — shown in the ping."),
+        archived: z
+          .boolean()
+          .optional()
+          .describe(
+            "true moves the task to cold storage: it keeps its status but disappears from every " +
+              "default view, count and claim_next_task pool. false restores it. Archive instead " +
+              "of deleting when the work is real but nobody is going to do it.",
+          ),
         parent_task_id: z
           .string()
           .nullable()
@@ -197,7 +216,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
           .describe("If set, completing this task auto-creates its next occurrence. Null clears it."),
       },
     },
-    async ({ board, task_id, due_date, needs_human, needs_human_reason, parent_task_id, ...patch }) => {
+    async ({ board, task_id, due_date, needs_human, needs_human_reason, archived, parent_task_id, ...patch }) => {
       try {
         await requireBoardAccess(env, token, board);
         const task = await boardStub(env, board).updateTask(task_id, {
@@ -205,6 +224,7 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
           dueDate: due_date,
           needsHuman: needs_human,
           needsHumanReason: needs_human_reason,
+          archivedAt: archived === undefined ? undefined : archived ? new Date().toISOString() : null,
           parentTaskId: parent_task_id,
         });
         return ok(task);
@@ -292,24 +312,171 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
     {
       title: "List Tasks",
       description:
-        "List tasks on a board, optionally filtered by status, assignee, or label. " +
-        "(No priority or claimed_by filter yet — BoardDO's ListTasksFilter doesn't carry " +
-        "those fields; widen this tool's schema if that changes.)",
+        "List tasks, on one board or across every board you can see. Omit `board` for the " +
+        "cross-board view — that reads the D1 index and supports priority/needs_human/" +
+        "updated_since/limit filters, which the single-board path does not. Pass `board` " +
+        "when you need a board's authoritative live state (it reads that board's Durable " +
+        "Object directly and can also filter by parent_task_id). Archived tasks are " +
+        "excluded from both unless you ask for them.",
       inputSchema: {
-        board: z.string(),
+        board: z.string().optional().describe("Board slug. Omit to search across every board you can see."),
         status: statusSchema.optional(),
         assignee: z.string().optional(),
         label: z.string().optional(),
-        parent_task_id: z.string().optional().describe("List only sub-tasks of this task id."),
+        priority: priorityEnum.optional().describe("Cross-board only (omit `board`)."),
+        needs_human: z.boolean().optional().describe("Cross-board only — true returns just the tasks flagged as blocked on a human."),
+        updated_since: z.string().optional().describe("Cross-board only — ISO 8601 timestamp; only tasks touched after it."),
+        archived: z
+          .enum(["exclude", "only", "all"])
+          .optional()
+          .describe('Archived tasks are cold storage and hidden by default. "only" lists the archive itself.'),
+        limit: z.number().int().min(1).max(1000).optional().describe("Cross-board only. Defaults to 200."),
+        parent_task_id: z.string().optional().describe("Single-board only — list sub-tasks of this task id."),
       },
     },
-    async ({ board, parent_task_id, ...filter }) => {
+    async ({ board, parent_task_id, priority, needs_human, updated_since, limit, archived, ...filter }) => {
       try {
-        await requireBoardAccess(env, token, board);
-        const tasks: Task[] = await boardStub(env, board).listTasks({ ...filter, parentTaskId: parent_task_id });
-        return ok(tasks);
+        if (board) {
+          await requireBoardAccess(env, token, board);
+          const tasks: Task[] = await boardStub(env, board).listTasks({
+            ...filter,
+            parentTaskId: parent_task_id,
+            archived,
+          });
+          return ok(tasks);
+        }
+
+        // Cross-board: the D1 index, scoped to the token owner's active
+        // workspace memberships — never a fan-out across every board's DO.
+        if (!token.createdBy) return ok([]);
+        const clauses = ["m.email = ?", "m.status = 'active'"];
+        const binds: (string | number)[] = [token.createdBy];
+        if (filter.status) {
+          clauses.push("t.status = ?");
+          binds.push(filter.status);
+        }
+        if (filter.assignee) {
+          clauses.push("t.assignee = ?");
+          binds.push(filter.assignee);
+        }
+        if (filter.label) {
+          clauses.push("t.labels LIKE ?");
+          binds.push(`%"${filter.label}"%`);
+        }
+        if (priority) {
+          clauses.push("t.priority = ?");
+          binds.push(priority);
+        }
+        if (needs_human !== undefined) {
+          clauses.push("t.needs_human = ?");
+          binds.push(needs_human ? 1 : 0);
+        }
+        if (updated_since) {
+          clauses.push("t.updated_at > ?");
+          binds.push(updated_since);
+        }
+        if (archived === "only") {
+          clauses.push("t.archived_at IS NOT NULL");
+        } else if (archived !== "all") {
+          clauses.push("t.archived_at IS NULL");
+        }
+        binds.push(limit ?? 200);
+
+        const { results } = await env.DB.prepare(
+          `SELECT t.id, t.board_id, b.name AS board_name, t.title, t.description, t.status,
+                  t.priority, t.assignee, t.labels, t.due_date,
+                  COALESCE(t.created_at, t.updated_at) AS created_at, t.updated_at,
+                  t.needs_human, t.needs_human_reason, t.archived_at
+           FROM tasks_index t
+           JOIN boards b ON b.id = t.board_id
+           JOIN workspace_members m ON m.workspace_id = b.workspace_id
+           WHERE ${clauses.join(" AND ")}
+           ORDER BY
+             CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END ASC,
+             t.updated_at DESC
+           LIMIT ?`
+        )
+          .bind(...binds)
+          .all<Record<string, unknown>>();
+
+        return ok(
+          (results ?? []).map((r) => ({
+            ...r,
+            labels: parseLabels(r.labels as string | null),
+            needs_human: r.needs_human === 1,
+          }))
+        );
       } catch (e) {
         return err(`list_tasks failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "bulk_update_tasks",
+    {
+      title: "Bulk Update Tasks",
+      description:
+        "Apply one patch to many tasks at once, across any number of boards — the tool to " +
+        "reach for when cleaning up a backlog (archive 20 stale tasks, re-prioritize a " +
+        "label, reassign a batch) instead of calling update_task in a loop. Partial " +
+        "failures are reported per task rather than rolling back the rest.",
+      inputSchema: {
+        items: z
+          .array(z.object({ board: z.string(), task_id: z.string() }))
+          .min(1)
+          .max(200)
+          .describe("The tasks to patch. Capped at 200 per call."),
+        status: statusSchema.optional(),
+        priority: priorityEnum.optional(),
+        assignee: z.string().nullable().optional(),
+        labels: z.array(z.string()).optional(),
+        due_date: z.string().nullable().optional(),
+        needs_human: z.boolean().optional(),
+        needs_human_reason: z.string().nullable().optional(),
+        archived: z.boolean().optional().describe("true archives (cold storage, hidden by default), false restores."),
+      },
+    },
+    async ({ items, archived, due_date, needs_human, needs_human_reason, ...rest }) => {
+      try {
+        const patch = {
+          ...rest,
+          dueDate: due_date,
+          needsHuman: needs_human,
+          needsHumanReason: needs_human_reason,
+          archivedAt: archived === undefined ? undefined : archived ? new Date().toISOString() : null,
+        };
+        if (Object.values(patch).every((v) => v === undefined)) {
+          return err("bulk_update_tasks failed: at least one field to change is required");
+        }
+
+        // Group by board so each DO is fetched once, and check access once
+        // per board before any write rather than per task.
+        const byBoard = new Map<string, string[]>();
+        for (const item of items) {
+          const ids = byBoard.get(item.board) ?? [];
+          ids.push(item.task_id);
+          byBoard.set(item.board, ids);
+        }
+        for (const board of byBoard.keys()) {
+          await requireBoardAccess(env, token, board);
+        }
+
+        const updated: Task[] = [];
+        const failed: { board: string; task_id: string; error: string }[] = [];
+        for (const [board, ids] of byBoard) {
+          const stub = boardStub(env, board);
+          for (const task_id of ids) {
+            try {
+              updated.push(await stub.updateTask(task_id, patch));
+            } catch (e) {
+              failed.push({ board, task_id, error: (e as Error).message });
+            }
+          }
+        }
+        return ok({ updated_count: updated.length, failed_count: failed.length, updated, failed });
+      } catch (e) {
+        return err(`bulk_update_tasks failed: ${(e as Error).message}`);
       }
     }
   );

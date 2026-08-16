@@ -73,6 +73,7 @@ export interface BoardDOStub {
   claimNextTask(filter: ClaimNextTaskFilter | undefined, claimedBy: string): Promise<Task | null>;
   commentTask(taskId: string, input: CreateCommentInput): Promise<Comment>;
   listTasks(filter?: ListTasksFilter): Promise<Task[]>;
+  resyncIndex(): Promise<number>;
   listColumns(): Promise<Column[]>;
   createColumn(input: CreateColumnInput): Promise<Column>;
   updateColumn(id: string, patch: UpdateColumnInput): Promise<Column>;
