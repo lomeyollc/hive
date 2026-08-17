@@ -285,7 +285,7 @@ async function listNeedsHuman(env: Env, email: string): Promise<Response> {
      FROM tasks_index t
      JOIN boards b ON b.id = t.board_id
      JOIN workspace_members m ON m.workspace_id = b.workspace_id
-     WHERE t.needs_human = 1 AND m.email = ? AND m.status = 'active'
+     WHERE t.needs_human = 1 AND t.archived_at IS NULL AND m.email = ? AND m.status = 'active'
      ORDER BY t.updated_at ASC`,
   )
     .bind(email)

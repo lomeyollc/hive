@@ -85,7 +85,7 @@ async function sendNeedsHumanDigest(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(
     `SELECT board_id, title, needs_human_reason
      FROM tasks_index
-     WHERE needs_human = 1
+     WHERE needs_human = 1 AND archived_at IS NULL
      ORDER BY board_id, updated_at ASC`,
   ).all<{ board_id: string; title: string; needs_human_reason: string | null }>();
 

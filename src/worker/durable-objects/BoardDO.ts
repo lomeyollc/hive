@@ -612,6 +612,16 @@ export class BoardDO extends DurableObject<Env> {
       recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
     };
 
+    // Archiving or completing a task resolves it by definition — cold storage
+    // and a done column both mean "no longer waiting on Zakir". Clearing the
+    // flag here, rather than filtering it out at each read site, keeps the
+    // data honest so every present and future surface inherits the right
+    // answer instead of re-implementing the same exclusion.
+    if (next.needs_human === 1 && (next.archived_at !== null || this.#isDoneColumn(next.status))) {
+      next.needs_human = 0;
+      next.needs_human_reason = null;
+    }
+
     this.ctx.storage.sql.exec(
       `UPDATE tasks SET
         title = ?, description = ?, status = ?, priority = ?, assignee = ?,
