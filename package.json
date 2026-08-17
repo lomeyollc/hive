@@ -13,7 +13,9 @@
     "cf-typegen": "wrangler types",
     "check": "tsc -b --noEmit",
     "d1:migrate:local": "wrangler d1 migrations apply hive --local",
-    "d1:migrate:remote": "wrangler d1 migrations apply hive --remote"
+    "d1:migrate:remote": "wrangler d1 migrations apply hive --remote",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -37,6 +39,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.52.1",
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
     "@cloudflare/workers-types": "^5.20260814.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",
@@ -46,6 +49,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
+    "vitest": "^4.1.10",
     "wrangler": "^4.123.0"
   },
   "allowScripts": {
