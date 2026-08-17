@@ -482,6 +482,27 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
   );
 
   server.registerTool(
+    "resync_board_index",
+    {
+      title: "Resync Board Index",
+      description:
+        "Replays a board's tasks from its Durable Object (the source of truth) into the D1 " +
+        "index that cross-board listing and search read. Repair tool for that mirror, which " +
+        "is written fire-and-forget and so can drift after a D1 hiccup or a newly added " +
+        "column. Safe to run any time — it only ever moves the index toward the truth.",
+      inputSchema: { board: z.string() },
+    },
+    async ({ board }) => {
+      try {
+        await requireBoardAccess(env, token, board);
+        return ok({ board, synced: await boardStub(env, board).resyncIndex() });
+      } catch (e) {
+        return err(`resync_board_index failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
     "list_boards",
     {
       title: "List Boards",
