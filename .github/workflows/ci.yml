@@ -1,0 +1,45 @@
+name: CI
+
+# Nothing stopped a broken commit from reaching main before this. Runs on every
+# PR and on direct pushes to main, because this is a solo repo where work
+# sometimes lands without a PR — gating only PRs would leave the usual path
+# unchecked.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # worker-configuration.d.ts is generated and gitignored, so typecheck
+      # fails on a fresh clone without this. Reads wrangler.jsonc only — no
+      # Cloudflare credentials needed.
+      - name: Generate Worker types
+        run: npm run cf-typegen
+
+      - name: Typecheck
+        run: npm run check
+
+      # Runs inside workerd via @cloudflare/vitest-pool-workers — real Durable
+      # Object SQLite, no mocks, no network, no account needed.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
