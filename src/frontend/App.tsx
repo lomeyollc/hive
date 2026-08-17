@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/pages/LoginPage";
 import { DocsPage } from "@/pages/DocsPage";
+import { AllWorkPage } from "@/pages/AllWorkPage";
 import { BoardListPage } from "@/pages/BoardListPage";
 import { BoardDetailPage } from "@/pages/BoardDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -21,6 +22,11 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
  *                          already authenticated)
  *   /docs                - PUBLIC docs: MCP server setup, REST API, self-host.
  *                          The URL shared from the README/social links.
+ *   /all                 - All work: every task across every board as one
+ *                          flat list, with filters, grouping and bulk
+ *                          actions (protected). The default landing page —
+ *                          all filter state lives in the query string, so
+ *                          any view is linkable and reloadable.
  *   /boards              - board list (protected)
  *   /boards/:slug         - board detail: tasks, create-task dialog, live
  *                          WebSocket updates, kanban/list view (protected)
@@ -58,6 +64,7 @@ export default function App() {
               </WorkspaceProvider>
             }
           >
+            <Route path="/all" element={<AllWorkPage />} />
             <Route path="/boards" element={<BoardListPage />} />
             <Route path="/boards/:slug" element={<BoardDetailPage />} />
             <Route path="/boards/:slug/tasks/:taskId" element={<BoardDetailPage />} />
@@ -68,7 +75,10 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route path="/" element={<Navigate to="/boards" replace />} />
+        {/* The daily entry point is the flat cross-board list, not the board
+            grid — with several boards the grid tells you counts, not what to
+            do next. /boards is still one click away in the nav. */}
+        <Route path="/" element={<Navigate to="/all" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </AuthProvider>

@@ -41,6 +41,7 @@
  * agent/MCP auth path, not the browser's.
  */
 import type {
+  AllWorkTask,
   ApiToken,
   Board,
   Column,
@@ -246,7 +247,10 @@ export async function updateTask(
       | "parent_task_id"
       | "recurrence"
     >
-  >,
+  > & {
+    /** The wire carries a boolean; the server stamps the timestamp. */
+    archived?: boolean;
+  },
 ): Promise<Task> {
   const data = await request<{ task: Task }>(
     `/api/boards/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(taskId)}`,
@@ -400,6 +404,69 @@ export interface NeedsHumanItem {
 export async function listNeedsHuman(): Promise<NeedsHumanItem[]> {
   const data = await request<{ count: number; items: NeedsHumanItem[] }>("/api/needs-human");
   return data.items;
+}
+
+/** Filters for GET /api/tasks. Array fields OR within themselves, AND across. */
+export interface AllWorkFilters {
+  board?: string[];
+  priority?: TaskPriority[];
+  status?: TaskStatus[];
+  label?: string[];
+  /** An email, or the literal "none" for unassigned. */
+  assignee?: string;
+  needsHuman?: boolean;
+  /** Archived tasks are hidden unless this says otherwise. */
+  archived?: "exclude" | "only" | "all";
+  /** Only tasks untouched for at least this many days. */
+  staleDays?: number;
+  q?: string;
+  sort?: "priority" | "updated" | "created" | "due";
+}
+
+export async function listAllTasks(filters: AllWorkFilters = {}): Promise<AllWorkTask[]> {
+  const qs = new URLSearchParams();
+  for (const board of filters.board ?? []) qs.append("board", board);
+  for (const priority of filters.priority ?? []) qs.append("priority", priority);
+  for (const status of filters.status ?? []) qs.append("status", status);
+  for (const label of filters.label ?? []) qs.append("label", label);
+  if (filters.assignee) qs.set("assignee", filters.assignee);
+  if (filters.needsHuman) qs.set("needs_human", "1");
+  if (filters.archived && filters.archived !== "exclude") qs.set("archived", filters.archived);
+  if (filters.staleDays) qs.set("stale_days", String(filters.staleDays));
+  if (filters.q?.trim()) qs.set("q", filters.q.trim());
+  if (filters.sort) qs.set("sort", filters.sort);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await request<{ count: number; items: AllWorkTask[] }>(`/api/tasks${suffix}`);
+  return data.items;
+}
+
+export interface BulkUpdateResult {
+  updated_count: number;
+  failed_count: number;
+  failed: { id: string; board_id: string; error: string }[];
+}
+
+/**
+ * One patch across many tasks on any number of boards. Partial failure is
+ * normal and reported — there is no cross-board transaction to roll back to,
+ * so callers should surface `failed_count` rather than assume all-or-nothing.
+ */
+export async function bulkUpdateTasks(
+  items: { board_id: string; id: string }[],
+  patch: {
+    status?: TaskStatus;
+    priority?: TaskPriority;
+    assignee?: string | null;
+    labels?: string[];
+    due_date?: string | null;
+    needs_human?: boolean;
+    archived?: boolean;
+  },
+): Promise<BulkUpdateResult> {
+  return request<BulkUpdateResult>("/api/tasks/bulk", {
+    method: "PATCH",
+    body: JSON.stringify({ items, patch }),
+  });
 }
 
 export interface ActivityItem {

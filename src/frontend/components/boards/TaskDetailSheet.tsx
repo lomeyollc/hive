@@ -19,7 +19,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hand, Trash2, AlertTriangle, Check, CornerDownRight, Repeat, Plus, ArrowUpRight } from "lucide-react";
+import {
+  Hand,
+  Trash2,
+  AlertTriangle,
+  Archive,
+  ArchiveRestore,
+  Check,
+  CornerDownRight,
+  Repeat,
+  Plus,
+  ArrowUpRight,
+} from "lucide-react";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 const RECURRENCE_LABEL: Record<string, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
@@ -62,6 +73,7 @@ export function TaskDetailSheet({
   const [claiming, setClaiming] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [subtaskTitle, setSubtaskTitle] = useState("");
   const [addingSubtask, setAddingSubtask] = useState(false);
 
@@ -175,6 +187,27 @@ export function TaskDetailSheet({
     }
   }
 
+  /**
+   * Archive is the answer to "this is real, but nobody is going to do it" —
+   * the case Delete handles badly, because deleting loses the record and
+   * leaving it open lets it clutter every list forever. It is reversible from
+   * the Archived view on /all, so it needs no confirmation the way Delete does.
+   */
+  async function handleToggleArchive() {
+    if (!task) return;
+    const archiving = task.archived_at === null;
+    setArchiving(true);
+    try {
+      const updated = await updateTask(boardSlug, task.id, { archived: archiving });
+      onTaskUpdated(updated);
+      toast.success(archiving ? "Archived — hidden from every default view" : "Restored");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to archive");
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   async function handleDelete() {
     if (!task) return;
     if (!window.confirm(`Delete "${task.title}"? This can't be undone.`)) return;
@@ -246,6 +279,16 @@ export function TaskDetailSheet({
             ))}
             <div className="ml-auto flex gap-1.5">
               <EditTaskDialog boardSlug={boardSlug} task={task} onUpdated={onTaskUpdated} />
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={archiving}
+                onClick={handleToggleArchive}
+              >
+                {task.archived_at ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
+                {task.archived_at ? "Restore" : "Archive"}
+              </Button>
               <Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={deleting} onClick={handleDelete}>
                 <Trash2 className="size-3.5" />
                 {deleting ? "Deleting…" : "Delete"}

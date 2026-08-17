@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Settings, LogOut, LayoutGrid, Users, Activity, BookOpen } from "lucide-react";
+import { Settings, LogOut, LayoutGrid, ListTodo, Users, Activity, BookOpen } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { HiveLogo } from "@/components/icons/HiveLogo";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,17 @@ export function AppShell() {
             {/* Full text nav — hidden below sm, folded into the user menu instead so the
                 header never overflows on a phone-width screen. */}
             <div className="hidden items-center gap-1 sm:flex">
+              <NavLink
+                to="/all"
+                className={({ isActive }) =>
+                  `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`
+                }
+              >
+                All work
+              </NavLink>
+
               <NavLink
                 to="/boards"
                 className={({ isActive }) =>
@@ -101,7 +112,13 @@ export function AppShell() {
                     <span className="text-sm font-medium">{user.email}</span>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {/* Same 4 destinations as the desktop nav row — only shown here below sm. */}
+                  {/* Same 5 destinations as the desktop nav row — only shown here below sm. */}
+                  <DropdownMenuItem asChild className="sm:hidden">
+                    <Link to="/all" className="flex items-center gap-2">
+                      <ListTodo className="size-4" />
+                      All work
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild className="sm:hidden">
                     <Link to="/boards" className="flex items-center gap-2">
                       <LayoutGrid className="size-4" />

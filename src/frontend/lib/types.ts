@@ -41,8 +41,35 @@ export interface Task {
   version: number;
   needs_human: boolean;
   needs_human_reason: string | null;
+  /** Cold storage. Set means the task is hidden from every default view and
+   *  count — see Task.archivedAt in src/worker/durable-objects/types.ts. */
+  archived_at: string | null;
   parent_task_id: string | null;
   recurrence: RecurrenceInterval | null;
+}
+
+/**
+ * A row of GET /api/tasks — the cross-board list. Same fields as Task minus
+ * the ones only the authoritative Durable Object carries (created_by,
+ * claimed_by, version, parent_task_id, recurrence), plus the board's display
+ * name so a flat list can say which board each row came from.
+ */
+export interface AllWorkTask {
+  id: string;
+  board_id: string;
+  board_name: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee: string | null;
+  labels: string[];
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+  needs_human: boolean;
+  needs_human_reason: string | null;
+  archived_at: string | null;
 }
 
 export interface Comment {
