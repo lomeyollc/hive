@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Archive, ArchiveRestore, AlertTriangle, Search, X } from "lucide-react";
 import {
@@ -33,6 +33,7 @@ import {
 import { MultiSelectFilter } from "@/components/boards/MultiSelectFilter";
 import { PriorityBadge, PRIORITY_OPTIONS } from "@/components/boards/PriorityBadge";
 import { GenericStatusBadge } from "@/components/boards/StatusBadge";
+import { CrossBoardTaskSheet } from "@/components/boards/CrossBoardTaskSheet";
 
 /**
  * "All work" — every task in every board you can see, as one flat list.
@@ -127,7 +128,6 @@ function taskKey(task: Pick<AllWorkTask, "board_id" | "id">): string {
 }
 
 export function AllWorkPage() {
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [tasks, setTasks] = useState<AllWorkTask[] | null>(null);
   const [boards, setBoards] = useState<Board[]>([]);
@@ -174,6 +174,31 @@ export function AllWorkPage() {
     },
     [params, setParams],
   );
+
+  /**
+   * The open task lives in the URL like every other bit of page state, but as
+   * a real history entry (not replace:) so Back closes the drawer and leaves
+   * the filtered list exactly as it was.
+   */
+  const openTaskId = params.get("task");
+  const openTaskBoard = params.get("task_board");
+
+  const openTask = useCallback(
+    (boardSlug: string, taskId: string) => {
+      const next = new URLSearchParams(params);
+      next.set("task", taskId);
+      next.set("task_board", boardSlug);
+      setParams(next);
+    },
+    [params, setParams],
+  );
+
+  const closeTask = useCallback(() => {
+    const next = new URLSearchParams(params);
+    next.delete("task");
+    next.delete("task_board");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
 
   const activeView = SAVED_VIEWS.find((view) =>
     Object.entries(view.params).every(([k, v]) => params.get(k) === v) &&
@@ -570,7 +595,7 @@ export function AllWorkPage() {
                         key={taskKey(task)}
                         data-state={selected.has(taskKey(task)) ? "selected" : undefined}
                         className="cursor-pointer"
-                        onClick={() => navigate(`/boards/${task.board_id}/tasks/${task.id}`)}
+                        onClick={() => openTask(task.board_id, task.id)}
                       >
                         <TableCell onClick={(event) => event.stopPropagation()}>
                           <Checkbox
@@ -620,6 +645,16 @@ export function AllWorkPage() {
           </Table>
         </div>
       )}
+
+      <CrossBoardTaskSheet
+        boardSlug={openTaskBoard}
+        taskId={openTaskId}
+        onOpenChange={(open) => {
+          if (!open) closeTask();
+        }}
+        onTaskChanged={() => void load()}
+        onOpenTask={openTask}
+      />
     </div>
   );
 }

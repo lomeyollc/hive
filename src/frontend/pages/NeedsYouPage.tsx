@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { listNeedsHuman, type NeedsHumanItem } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
 import { AlertTriangle } from "lucide-react";
+import { CrossBoardTaskSheet } from "@/components/boards/CrossBoardTaskSheet";
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -20,30 +21,48 @@ function timeAgo(iso: string): string {
  * The dedicated landing page for the nav badge ("N need you") — every task
  * flagged needs_human across every board you're in, grouped by board so
  * "which product is this on" isn't a mystery. Clicking a card opens that
- * exact task (its own URL, per product-rules.md Rule 38) where the real
- * Resolve action already lives — this page is a triage view, not a second
- * place to resolve things.
+ * exact task in a drawer over the list, where the real Resolve action already
+ * lives — this page is a triage view, not a second place to resolve things.
+ *
+ * The drawer opens in place rather than navigating to the board: triage is a
+ * queue, and answering one item should not cost you the other nine. The task
+ * still has its own URL (?task=…&task_board=…, per product-rules.md Rule 38)
+ * and resolving one refreshes the list, so it leaves the queue immediately.
  */
 export function NeedsYouPage() {
-  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [items, setItems] = useState<NeedsHumanItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    listNeedsHuman()
-      .then((data) => {
-        if (!cancelled) setItems(data);
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : "Failed to load";
-        if (!cancelled) setError(message);
-        toast.error(message);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      setItems(await listNeedsHuman());
+      setError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load";
+      setError(message);
+      toast.error(message);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const openTaskId = params.get("task");
+  const openTaskBoard = params.get("task_board");
+
+  // A real history entry, so Back closes the drawer and returns to the queue.
+  const openTask = useCallback(
+    (boardSlug: string, taskId: string) => {
+      setParams(new URLSearchParams({ task: taskId, task_board: boardSlug }));
+    },
+    [setParams],
+  );
+
+  const closeTask = useCallback(() => {
+    setParams(new URLSearchParams(), { replace: true });
+  }, [setParams]);
 
   const byBoard = new Map<string, { name: string; items: NeedsHumanItem[] }>();
   for (const item of items ?? []) {
@@ -95,7 +114,7 @@ export function NeedsYouPage() {
                   <Card
                     key={item.id}
                     className="cursor-pointer border-destructive/40 bg-destructive/5 transition-colors hover:border-destructive/70"
-                    onClick={() => navigate(`/boards/${item.board_id}/tasks/${item.id}`)}
+                    onClick={() => openTask(item.board_id, item.id)}
                   >
                     <CardHeader className="pb-2">
                       <div className="flex items-start gap-1.5">
@@ -121,6 +140,16 @@ export function NeedsYouPage() {
           ))}
         </div>
       )}
+
+      <CrossBoardTaskSheet
+        boardSlug={openTaskBoard}
+        taskId={openTaskId}
+        onOpenChange={(open) => {
+          if (!open) closeTask();
+        }}
+        onTaskChanged={() => void load()}
+        onOpenTask={openTask}
+      />
     </div>
   );
 }

@@ -194,12 +194,14 @@ export async function deleteBoard(slug: string): Promise<void> {
 export interface TaskFilters {
   status?: TaskStatus;
   assignee?: string;
+  archived?: "exclude" | "only" | "all";
 }
 
 export async function listTasks(slug: string, filters: TaskFilters = {}): Promise<Task[]> {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
   if (filters.assignee) params.set("assignee", filters.assignee);
+  if (filters.archived && filters.archived !== "exclude") params.set("archived", filters.archived);
   const qs = params.toString();
   const data = await request<{ tasks: Task[] }>(
     `/api/boards/${encodeURIComponent(slug)}/tasks${qs ? `?${qs}` : ""}`,

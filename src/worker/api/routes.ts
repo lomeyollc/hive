@@ -1010,6 +1010,9 @@ async function listTasks(env: Env, slug: string, params: URLSearchParams): Promi
     assignee: params.get("assignee") ?? undefined,
     label: params.get("label") ?? undefined,
     parentTaskId: params.get("parent_task_id") ?? undefined,
+    // Needed by the cross-board drawer: opening a task from /all's Archived
+    // view must be able to find it. Default stays "exclude".
+    archived: (params.get("archived") as ListTasksFilter["archived"]) ?? undefined,
   };
   const tasks = await env.BOARD_DO.getByName(slug).listTasks(filter);
   return json({ tasks: tasks.map(taskToWire) });

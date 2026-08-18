@@ -68,6 +68,9 @@ export function TaskDetailSheet({
   onTaskDeleted,
   /** Newest comments pushed in over the board WebSocket while this task is open. */
   liveComments,
+  /** Shown above the title on cross-board pages, where "which board is this?"
+   *  isn't answered by the page behind the drawer. */
+  boardLabel,
 }: {
   boardSlug: string;
   task: Task | null;
@@ -80,6 +83,7 @@ export function TaskDetailSheet({
   onTaskUpdated: (task: Task) => void;
   onTaskDeleted: (taskId: string) => void;
   liveComments: Comment[];
+  boardLabel?: string;
 }) {
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [commentBody, setCommentBody] = useState("");
@@ -261,10 +265,15 @@ export function TaskDetailSheet({
     <Sheet open={task !== null} onOpenChange={onOpenChange}>
       {/* No SheetDescription: the task description lives in the scroll body, so
           Radix's auto-description wiring is opted out of explicitly. */}
-      <SheetContent aria-describedby={undefined} className="flex w-full flex-col gap-0 p-0 sm:max-w-xl">
+      <SheetContent aria-describedby={undefined} className="flex w-full flex-col gap-0 p-0 sm:w-[46vw] sm:min-w-[34rem] sm:max-w-[56rem]">
         {/* Pinned: title and the two actions used on nearly every open — change
             status, and copy the link. Everything rare sits behind the ⋯ menu. */}
         <SheetHeader className="gap-3 border-b p-4 pr-12">
+          {boardLabel && (
+            <span className="w-fit font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+              {boardLabel}
+            </span>
+          )}
           {parentTask && (
             <button
               type="button"
