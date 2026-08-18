@@ -28,3 +28,4 @@ Tools, each backed by RPC calls into the relevant board's `BoardDO`:
 - `comment_task`
 - `list_tasks` (filter by board/status/assignee/label)
 - `list_boards` — reads D1's `boards` table directly, no DO call
+- `create_board` — inserts the board row, then touches the DO so its default columns get seeded. Resolves the workspace automatically when the token owner belongs to exactly one. Deleting a board stays dashboard-only.

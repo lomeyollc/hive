@@ -193,7 +193,8 @@ export function DocsPage() {
             <p>
               <code>create_task</code>, <code>get_task</code>, <code>update_task</code>,{" "}
               <code>delete_task</code>, <code>claim_next_task</code>, <code>comment_task</code>,{" "}
-              <code>list_tasks</code>, <code>list_boards</code>, <code>list_activity</code>,{" "}
+              <code>list_tasks</code>, <code>list_boards</code>, <code>create_board</code>,{" "}
+              <code>list_activity</code>,{" "}
               <code>search</code>, <code>list_columns</code>, <code>create_column</code>,{" "}
               <code>update_column</code>, <code>delete_column</code>, <code>reorder_columns</code>.
               Call <code>tools/list</code> for the exact input schema of each — don't guess field

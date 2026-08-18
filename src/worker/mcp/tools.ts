@@ -528,6 +528,97 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
   );
 
   server.registerTool(
+    "create_board",
+    {
+      title: "Create Board",
+      description:
+        "Create a new board. `id` is the slug every other tool takes as `board` — lowercase letters, numbers and " +
+        "hyphens only, and permanent. The board starts with the standard columns (planned, open, in_progress, " +
+        "blocked, done). Omit `workspace_id` when you belong to exactly one workspace. Deleting a board is " +
+        "deliberately not exposed here — that stays a dashboard action.",
+      inputSchema: {
+        id: z
+          .string()
+          .regex(/^[a-z0-9-]+$/, "id must be lowercase letters, numbers and hyphens only")
+          .describe("Board slug, e.g. \"jeffclaw\". Permanent — this is what every other tool passes as `board`."),
+        name: z.string().min(1).describe("Human-readable board name shown in the dashboard."),
+        description: z.string().optional(),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe("Only needed when you are an active member of more than one workspace."),
+      },
+    },
+    async ({ id, name, description, workspace_id }) => {
+      try {
+        if (!token.createdBy) {
+          return err("create_board failed: this token has no owner, so no workspace can be resolved");
+        }
+
+        // Resolve the workspace before touching anything: either the caller named
+        // one (and must be an active member of it), or they belong to exactly one.
+        let workspaceId = workspace_id?.trim();
+        if (workspaceId) {
+          const member = await env.DB.prepare(
+            `SELECT 1 FROM workspace_members WHERE workspace_id = ? AND email = ? AND status = 'active' LIMIT 1`
+          )
+            .bind(workspaceId, token.createdBy)
+            .first();
+          if (!member) {
+            return err(`create_board failed: not an active member of workspace "${workspaceId}"`);
+          }
+        } else {
+          const { results } = await env.DB.prepare(
+            `SELECT workspace_id FROM workspace_members WHERE email = ? AND status = 'active'`
+          )
+            .bind(token.createdBy)
+            .all<{ workspace_id: string }>();
+          const ids = (results ?? []).map((r) => r.workspace_id);
+          if (ids.length === 0) {
+            return err("create_board failed: you are not an active member of any workspace");
+          }
+          if (ids.length > 1) {
+            return err(
+              `create_board failed: you belong to ${ids.length} workspaces (${ids.join(", ")}) — pass workspace_id to pick one`
+            );
+          }
+          workspaceId = ids[0];
+        }
+
+        // A duplicate slug would otherwise surface as an opaque D1 constraint error,
+        // and silently adopting an existing board is worse than refusing.
+        const existing = await env.DB.prepare(`SELECT 1 FROM boards WHERE id = ? LIMIT 1`).bind(id).first();
+        if (existing) {
+          return err(`create_board failed: board "${id}" already exists`);
+        }
+
+        const createdAt = new Date().toISOString();
+        await env.DB.prepare(
+          `INSERT INTO boards (id, name, description, created_at, workspace_id) VALUES (?, ?, ?, ?, ?)`
+        )
+          .bind(id, name.trim(), description?.trim() || null, createdAt, workspaceId)
+          .run();
+
+        // First call into the board's Durable Object runs its migration, which is
+        // what seeds the default columns. Return them so the caller can use a
+        // valid `status` immediately without a second round-trip.
+        const columns = await boardStub(env, id).listColumns();
+
+        return ok({
+          id,
+          name: name.trim(),
+          description: description?.trim() || null,
+          workspace_id: workspaceId,
+          created_at: createdAt,
+          columns,
+        });
+      } catch (e) {
+        return err(`create_board failed: ${(e as Error).message}`);
+      }
+    }
+  );
+
+  server.registerTool(
     "list_activity",
     {
       title: "List Activity",

@@ -26,7 +26,8 @@ https://hive.lomeyo.com/settings (requires signing in as a human first; a
 token acts within its creator's workspace memberships, never wider).
 
 Tools exposed: create_task, get_task, update_task, delete_task,
-claim_next_task, comment_task, list_tasks, list_boards, list_activity,
+claim_next_task, comment_task, list_tasks, list_boards, create_board,
+list_activity,
 search, list_columns, create_column, update_column, delete_column,
 reorder_columns. Each tool's full input schema is served by the MCP server
 itself via `tools/list` — call that instead of guessing field names.
