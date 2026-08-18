@@ -8,7 +8,6 @@ import { EditTaskDialog } from "@/components/boards/EditTaskDialog";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -17,6 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -26,7 +32,11 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  ChevronDown,
+  ChevronUp,
   CornerDownRight,
+  MoreHorizontal,
+  Pencil,
   Repeat,
   Plus,
   ArrowUpRight,
@@ -34,6 +44,10 @@ import {
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 const RECURRENCE_LABEL: Record<string, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+
+/** Descriptions longer than this are collapsed on open — agents write essays,
+ *  and a wall of text pushed status, comments and everything else off-screen. */
+const DESCRIPTION_COLLAPSE_CHARS = 420;
 
 function formatDateTime(iso: string) {
   try {
@@ -76,6 +90,15 @@ export function TaskDetailSheet({
   const [archiving, setArchiving] = useState(false);
   const [subtaskTitle, setSubtaskTitle] = useState("");
   const [addingSubtask, setAddingSubtask] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const taskId = task?.id ?? null;
+
+  useEffect(() => {
+    setDescExpanded(false);
+    setCommentBody("");
+  }, [taskId]);
 
   useEffect(() => {
     if (!task) {
@@ -120,6 +143,16 @@ export function TaskDetailSheet({
 
   const parentTask = task.parent_task_id ? (allTasks.find((t) => t.id === task.parent_task_id) ?? null) : null;
   const subtasks = allTasks.filter((t) => t.parent_task_id === task.id);
+  const description = task.description?.trim() ?? "";
+  const longDescription = description.length > DESCRIPTION_COLLAPSE_CHARS;
+
+  /** Only the fields that actually carry a value — an all-"—" grid is noise. */
+  const details: { label: string; value: string }[] = [
+    { label: "Claimed by", value: task.claimed_by ?? "" },
+    { label: "Due", value: task.due_date ?? "" },
+    { label: "Created by", value: task.created_by ?? "" },
+    { label: "Updated", value: formatDateTime(task.updated_at) },
+  ].filter((d) => d.value !== "");
 
   async function handleAddSubtask() {
     if (!task || !subtaskTitle.trim()) return;
@@ -226,13 +259,12 @@ export function TaskDetailSheet({
 
   return (
     <Sheet open={task !== null} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col gap-0 sm:max-w-lg">
-        <SheetHeader>
-          <div className="flex items-start gap-1 pr-6">
-            <SheetTitle className="flex-1">{task.title}</SheetTitle>
-            <CopyLinkButton path={`/boards/${boardSlug}/tasks/${task.id}`} className="mt-0.5" />
-          </div>
-          {task.description && <SheetDescription>{task.description}</SheetDescription>}
+      {/* No SheetDescription: the task description lives in the scroll body, so
+          Radix's auto-description wiring is opted out of explicitly. */}
+      <SheetContent aria-describedby={undefined} className="flex w-full flex-col gap-0 p-0 sm:max-w-xl">
+        {/* Pinned: title and the two actions used on nearly every open — change
+            status, and copy the link. Everything rare sits behind the ⋯ menu. */}
+        <SheetHeader className="gap-3 border-b p-4 pr-12">
           {parentTask && (
             <button
               type="button"
@@ -243,15 +275,92 @@ export function TaskDetailSheet({
               Part of: {parentTask.title}
             </button>
           )}
-          {task.recurrence && (
-            <span className="flex w-fit items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-              <Repeat className="size-3" />
-              Repeats {RECURRENCE_LABEL[task.recurrence]}
+
+          <div className="flex items-start gap-1">
+            <SheetTitle className="flex-1 text-base leading-snug">{task.title}</SheetTitle>
+            <CopyLinkButton path={`/boards/${boardSlug}/tasks/${task.id}`} className="mt-0.5 shrink-0" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon-sm" variant="ghost" className="mt-0.5 shrink-0" aria-label="Task actions">
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+                  <Pencil className="size-3.5" />
+                  Edit task
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={archiving} onSelect={() => void handleToggleArchive()}>
+                  {task.archived_at ? (
+                    <ArchiveRestore className="size-3.5" />
+                  ) : (
+                    <Archive className="size-3.5" />
+                  )}
+                  {task.archived_at ? "Restore" : "Archive"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" disabled={deleting} onSelect={() => void handleDelete()}>
+                  <Trash2 className="size-3.5" />
+                  {deleting ? "Deleting…" : "Delete"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={task.status}
+              onValueChange={(v) => handleStatusChange(v as Task["status"])}
+              disabled={updatingStatus}
+            >
+              <SelectTrigger size="sm" className="w-auto" aria-label="Status">
+                <SelectValue>
+                  {(() => {
+                    const column = columns.find((c) => c.id === task.status);
+                    return column ? <StatusBadge column={column} /> : <GenericStatusBadge status={task.status} />;
+                  })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {[...columns]
+                  .sort((a, b) => a.position - b.position)
+                  .map((column) => (
+                    <SelectItem key={column.id} value={column.id}>
+                      {column.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+
+            <PriorityBadge priority={task.priority} />
+
+            <span className="text-xs text-muted-foreground">
+              {task.assignee ? task.assignee : "Unassigned"}
             </span>
-          )}
+
+            {task.recurrence && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Repeat className="size-3" />
+                {RECURRENCE_LABEL[task.recurrence]}
+              </span>
+            )}
+
+            {!task.claimed_by && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto h-7 gap-1.5 text-xs"
+                disabled={claiming}
+                onClick={handleClaim}
+              >
+                <Hand className="size-3.5" />
+                {claiming ? "Claiming…" : "Claim"}
+              </Button>
+            )}
+          </div>
         </SheetHeader>
 
-        <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-4">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
           {task.needs_human && (
             <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
               <div className="flex items-start gap-2">
@@ -270,85 +379,43 @@ export function TaskDetailSheet({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <PriorityBadge priority={task.priority} />
-            {task.labels.map((label) => (
-              <span key={label} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {label}
-              </span>
-            ))}
-            <div className="ml-auto flex gap-1.5">
-              <EditTaskDialog boardSlug={boardSlug} task={task} onUpdated={onTaskUpdated} />
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                disabled={archiving}
-                onClick={handleToggleArchive}
+          {task.archived_at && (
+            <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Archived — hidden from every default view. Restore it from the ⋯ menu.
+            </p>
+          )}
+
+          {description && (
+            <div className="flex flex-col items-start gap-1">
+              <p
+                className={`text-sm whitespace-pre-wrap text-muted-foreground ${
+                  longDescription && !descExpanded ? "line-clamp-6" : ""
+                }`}
               >
-                {task.archived_at ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
-                {task.archived_at ? "Restore" : "Archive"}
-              </Button>
-              <Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={deleting} onClick={handleDelete}>
-                <Trash2 className="size-3.5" />
-                {deleting ? "Deleting…" : "Delete"}
-              </Button>
+                {description}
+              </p>
+              {longDescription && (
+                <button
+                  type="button"
+                  onClick={() => setDescExpanded((v) => !v)}
+                  className="flex items-center gap-1 text-xs font-medium text-foreground hover:underline"
+                >
+                  {descExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                  {descExpanded ? "Show less" : "Show more"}
+                </button>
+              )}
             </div>
-          </div>
+          )}
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground">Status</p>
-              <Select
-                value={task.status}
-                onValueChange={(v) => handleStatusChange(v as Task["status"])}
-                disabled={updatingStatus}
-              >
-                <SelectTrigger className="mt-1 h-8">
-                  <SelectValue>
-                    {(() => {
-                      const column = columns.find((c) => c.id === task.status);
-                      return column ? <StatusBadge column={column} /> : <GenericStatusBadge status={task.status} />;
-                    })()}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {[...columns]
-                    .sort((a, b) => a.position - b.position)
-                    .map((column) => (
-                      <SelectItem key={column.id} value={column.id}>
-                        {column.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+          {task.labels.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {task.labels.map((label) => (
+                <span key={label} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                  {label}
+                </span>
+              ))}
             </div>
-
-            <div>
-              <p className="text-xs text-muted-foreground">Assignee</p>
-              <p className="mt-1.5">{task.assignee ?? "—"}</p>
-            </div>
-
-            <div>
-              <p className="text-xs text-muted-foreground">Claimed by</p>
-              <p className="mt-1.5">{task.claimed_by ?? "Unclaimed"}</p>
-            </div>
-
-            <div>
-              <p className="text-xs text-muted-foreground">Due</p>
-              <p className="mt-1.5">{task.due_date ?? "—"}</p>
-            </div>
-
-            <div>
-              <p className="text-xs text-muted-foreground">Created by</p>
-              <p className="mt-1.5">{task.created_by ?? "—"}</p>
-            </div>
-
-            <div>
-              <p className="text-xs text-muted-foreground">Updated</p>
-              <p className="mt-1.5">{formatDateTime(task.updated_at)}</p>
-            </div>
-          </div>
+          )}
 
           {task.status === "planned" && (
             <div className="rounded-md border bg-muted/30 px-3 py-2.5">
@@ -373,12 +440,14 @@ export function TaskDetailSheet({
             </div>
           )}
 
-          {!task.claimed_by && (
-            <Button size="sm" variant="outline" className="w-fit gap-1.5" disabled={claiming} onClick={handleClaim}>
-              <Hand className="size-3.5" />
-              {claiming ? "Claiming…" : "Claim this task"}
-            </Button>
-          )}
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+            {details.map((detail) => (
+              <div key={detail.label} className="contents">
+                <dt className="text-muted-foreground">{detail.label}</dt>
+                <dd className="text-foreground">{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
 
           <Separator />
 
@@ -427,7 +496,9 @@ export function TaskDetailSheet({
           <Separator />
 
           <div className="flex flex-col gap-3">
-            <p className="text-sm font-medium">Comments</p>
+            <p className="text-sm font-medium">
+              Comments{comments && comments.length > 0 ? ` (${comments.length})` : ""}
+            </p>
 
             {comments === null && (
               <div className="flex flex-col gap-2">
@@ -458,19 +529,36 @@ export function TaskDetailSheet({
           </div>
         </div>
 
-        <SheetFooter className="mt-auto border-t pt-4">
+        <SheetFooter className="mt-auto border-t p-4">
           <div className="flex w-full flex-col gap-2">
             <Textarea
               value={commentBody}
               onChange={(e) => setCommentBody(e.target.value)}
-              placeholder="Add a comment…"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void handlePostComment();
+                }
+              }}
+              placeholder="Add a comment… (⌘↵ to post)"
               rows={2}
             />
-            <Button size="sm" className="self-end" disabled={posting || !commentBody.trim()} onClick={handlePostComment}>
-              {posting ? "Posting…" : "Comment"}
-            </Button>
+            {commentBody.trim() && (
+              <Button size="sm" className="self-end" disabled={posting} onClick={handlePostComment}>
+                {posting ? "Posting…" : "Comment"}
+              </Button>
+            )}
           </div>
         </SheetFooter>
+
+        {/* Rendered controlled, with no trigger of its own — opened from the ⋯ menu. */}
+        <EditTaskDialog
+          boardSlug={boardSlug}
+          task={task}
+          onUpdated={onTaskUpdated}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
       </SheetContent>
     </Sheet>
   );

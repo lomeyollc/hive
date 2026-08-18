@@ -23,12 +23,21 @@ export function EditTaskDialog({
   boardSlug,
   task,
   onUpdated,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   boardSlug: string;
   task: Task;
   onUpdated: (task: Task) => void;
+  /** Controlled mode — pass both to open it from somewhere else (e.g. the task
+   *  sheet's ⋯ menu); the built-in Edit button is then not rendered. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = controlledOpen !== undefined;
+  const open = controlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setUncontrolledOpen;
   const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
@@ -89,12 +98,14 @@ export function EditTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={openWithFreshValues}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="gap-1.5">
-          <Pencil className="size-3.5" />
-          Edit
-        </Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" className="gap-1.5">
+            <Pencil className="size-3.5" />
+            Edit
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
