@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { GenericStatusBadge, StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
+import { RecurrenceBadge } from "@/components/boards/RecurrenceBadge";
 
 export function TaskCard({
   task,
@@ -41,6 +42,7 @@ export function TaskCard({
             {task.assignee && (
               <span className="text-xs text-muted-foreground">→ {task.assignee}</span>
             )}
+            {task.recurrence && <RecurrenceBadge recurrence={task.recurrence} />}
           </div>
           {task.labels.length > 0 && (
             <div className="flex flex-wrap gap-1">

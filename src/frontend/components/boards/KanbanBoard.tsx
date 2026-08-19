@@ -10,6 +10,7 @@ import { useDraggable, useDroppable } from "@dnd-kit/core";
 import type { Column, Task, TaskStatus } from "@/lib/types";
 import { StatusBadge } from "@/components/boards/StatusBadge";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
+import { RecurrenceBadge } from "@/components/boards/RecurrenceBadge";
 import { AlertTriangle } from "lucide-react";
 
 function KanbanCard({ task, onOpen }: { task: Task; onOpen: (task: Task) => void }) {
@@ -36,6 +37,7 @@ function KanbanCard({ task, onOpen }: { task: Task; onOpen: (task: Task) => void
       <div className="mt-2 flex flex-wrap items-center gap-1">
         <PriorityBadge priority={task.priority} />
         {task.assignee && <span className="text-[11px] text-muted-foreground">→ {task.assignee}</span>}
+        {task.recurrence && <RecurrenceBadge recurrence={task.recurrence} className="text-[11px]" />}
       </div>
     </div>
   );

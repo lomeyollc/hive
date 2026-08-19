@@ -37,13 +37,11 @@ import {
   CornerDownRight,
   MoreHorizontal,
   Pencil,
-  Repeat,
   Plus,
   ArrowUpRight,
 } from "lucide-react";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-
-const RECURRENCE_LABEL: Record<string, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+import { RecurrenceBadge } from "@/components/boards/RecurrenceBadge";
 
 /** Descriptions longer than this are collapsed on open — agents write essays,
  *  and a wall of text pushed status, comments and everything else off-screen. */
@@ -347,12 +345,7 @@ export function TaskDetailSheet({
               {task.assignee ? task.assignee : "Unassigned"}
             </span>
 
-            {task.recurrence && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Repeat className="size-3" />
-                {RECURRENCE_LABEL[task.recurrence]}
-              </span>
-            )}
+            {task.recurrence && <RecurrenceBadge recurrence={task.recurrence} />}
 
             {!task.claimed_by && (
               <Button
