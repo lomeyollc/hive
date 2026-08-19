@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { createTask } from "@/lib/api";
-import type { Column, Task, TaskPriority, TaskStatus } from "@/lib/types";
+import type { Column, RecurrenceInterval, Task, TaskPriority, TaskStatus } from "@/lib/types";
 import { PRIORITY_OPTIONS } from "@/components/boards/PriorityBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +40,7 @@ export function CreateTaskDialog({
   const [dueDate, setDueDate] = useState("");
   const [needsHuman, setNeedsHuman] = useState(false);
   const [needsHumanReason, setNeedsHumanReason] = useState("");
+  const [recurrence, setRecurrence] = useState<RecurrenceInterval | "none">("none");
 
   function reset() {
     setTitle("");
@@ -51,6 +52,7 @@ export function CreateTaskDialog({
     setDueDate("");
     setNeedsHuman(false);
     setNeedsHumanReason("");
+    setRecurrence("none");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -74,6 +76,7 @@ export function CreateTaskDialog({
         due_date: dueDate || undefined,
         needs_human: needsHuman || undefined,
         needs_human_reason: needsHuman ? needsHumanReason.trim() || undefined : undefined,
+        recurrence: recurrence === "none" ? undefined : recurrence,
       });
       toast.success(needsHuman ? "Task created — pinged you on Telegram" : "Task created");
       onCreated(task);
@@ -164,7 +167,28 @@ export function CreateTaskDialog({
                 <Label htmlFor="task-due">Due date</Label>
                 <Input id="task-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
               </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-recurrence">Repeats</Label>
+                <Select value={recurrence} onValueChange={(v) => setRecurrence(v as typeof recurrence)}>
+                  <SelectTrigger id="task-recurrence">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Doesn't repeat</SelectItem>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {recurrence !== "none" && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                Marking this task Done will automatically create the next occurrence.
+              </p>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="task-assignee">Assignee</Label>
