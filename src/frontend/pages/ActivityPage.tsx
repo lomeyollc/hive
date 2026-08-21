@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GenericStatusBadge } from "@/components/boards/StatusBadge";
 import { Search as SearchIcon, Plus, Pencil, Hand, Trash2, MessageSquare } from "lucide-react";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const TYPE_ICON: Record<ActivityItem["type"], typeof Plus> = {
   "task.created": Plus,
@@ -31,6 +32,7 @@ function timeAgo(iso: string): string {
  * happened" or "where did we talk about X" without opening every board.
  */
 export function ActivityPage() {
+  useDocumentTitle("Activity");
   const navigate = useNavigate();
   const [items, setItems] = useState<ActivityItem[] | null>(null);
   const [query, setQuery] = useState("");

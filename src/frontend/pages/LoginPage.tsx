@@ -2,6 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
 import { HiveLogo } from "@/components/icons/HiveLogo";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const HIGHLIGHTS = [
   "Tasks, made by you or your agents",
@@ -10,6 +11,7 @@ const HIGHLIGHTS = [
 ];
 
 export function LoginPage() {
+  useDocumentTitle("Sign in");
   const { user, loading } = useAuth();
   const location = useLocation();
 

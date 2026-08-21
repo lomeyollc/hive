@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function formatDateTime(iso: string | null) {
   if (!iso) return "Never";
@@ -38,6 +39,7 @@ function formatDateTime(iso: string | null) {
 }
 
 export function SettingsPage() {
+  useDocumentTitle("Settings");
   const [tokens, setTokens] = useState<ApiToken[] | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newTokenName, setNewTokenName] = useState("");

@@ -7,6 +7,7 @@ import { HiveLogo } from "@/components/icons/HiveLogo";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 /**
  * PUBLIC route (/invites/:token, outside ProtectedRoute in App.tsx) — an
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
  * head to /boards. If signed in as a different email, offer to switch.
  */
 export function AcceptInvitePage() {
+  useDocumentTitle("Accept invite");
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { user, loading: authLoading, signOut } = useAuth();

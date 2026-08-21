@@ -4,7 +4,8 @@ import { ArrowLeft, Search, LayoutGrid, List as ListIcon } from "lucide-react";
 import { toast } from "sonner";
 import { claimTask, getBoard, listTasks, updateTask } from "@/lib/api";
 import { useBoardSocket } from "@/hooks/use-board-socket";
-import type { Column, Comment, Task, TaskStatus } from "@/lib/types";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import type { Board, Column, Comment, Task, TaskStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,6 +21,7 @@ export function BoardDetailPage() {
   const { slug, taskId } = useParams<{ slug: string; taskId?: string }>();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [board, setBoard] = useState<Board | null>(null);
   const [columns, setColumns] = useState<Column[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | TaskStatus>("all");
@@ -35,12 +37,14 @@ export function BoardDetailPage() {
     if (!slug) return;
     let cancelled = false;
     setTasks(null);
+    setBoard(null);
     setColumns(null);
     Promise.all([listTasks(slug), getBoard(slug)])
-      .then(([taskData, board]) => {
+      .then(([taskData, boardData]) => {
         if (cancelled) return;
         setTasks(taskData);
-        setColumns(board.columns ?? []);
+        setBoard(boardData);
+        setColumns(boardData.columns ?? []);
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "Failed to load board";
@@ -135,6 +139,19 @@ export function BoardDetailPage() {
   );
 
   const selectedTask = tasks?.find((t) => t.id === selectedTaskId) ?? null;
+
+  // Board name over slug when it has loaded; an open task sheet owns the tab
+  // title, since /boards/:slug/tasks/:taskId is that task's stable address.
+  // Null while nothing has loaded yet — no flash of a bare slug.
+  useDocumentTitle(
+    selectedTask
+      ? selectedTask.title
+      : board
+        ? board.name
+        : selectedTaskId
+          ? null
+          : (slug ?? null),
+  );
 
   async function handleClaim(task: Task) {
     if (!slug) return;

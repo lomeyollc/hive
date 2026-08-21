@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { InviteMemberDialog } from "@/components/workspace/InviteMemberDialog";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Pencil, Check, X } from "lucide-react";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function formatDate(iso: string) {
   try {
@@ -88,6 +89,9 @@ function WorkspaceName({ id, name, onRenamed }: { id: string; name: string; onRe
 
 export function WorkspacePage() {
   const { current, refresh } = useWorkspace();
+  // Null while the workspace list loads — keeps the previous title instead of
+  // flashing a placeholder for a page that is named after its workspace.
+  useDocumentTitle(current ? `${current.name} · Workspace` : null);
   const [members, setMembers] = useState<WorkspaceMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 

@@ -11,8 +11,10 @@ import { GenericStatusBadge } from "@/components/boards/StatusBadge";
 import { CreateBoardDialog } from "@/components/boards/CreateBoardDialog";
 import { CreateWorkspaceDialog } from "@/components/workspace/CreateWorkspaceDialog";
 import { Users } from "lucide-react";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export function BoardListPage() {
+  useDocumentTitle("Boards");
   const { workspaces, current: workspace, refresh: refreshWorkspaces } = useWorkspace();
   const [boards, setBoards] = useState<Board[] | null>(null);
   const [error, setError] = useState<string | null>(null);

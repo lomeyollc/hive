@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HiveLogo } from "@/components/icons/HiveLogo";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function CodeBlock({ children, lang }: { children: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
@@ -63,6 +64,7 @@ const NAV = [
  * so it has to render something useful to a stranger with no account.
  */
 export function DocsPage() {
+  useDocumentTitle("Docs");
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">

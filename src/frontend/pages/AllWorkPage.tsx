@@ -34,6 +34,7 @@ import { MultiSelectFilter } from "@/components/boards/MultiSelectFilter";
 import { PriorityBadge, PRIORITY_OPTIONS } from "@/components/boards/PriorityBadge";
 import { GenericStatusBadge } from "@/components/boards/StatusBadge";
 import { CrossBoardTaskSheet } from "@/components/boards/CrossBoardTaskSheet";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 /**
  * "All work" — every task in every board you can see, as one flat list.
@@ -182,6 +183,12 @@ export function AllWorkPage() {
    */
   const openTaskId = params.get("task");
   const openTaskBoard = params.get("task_board");
+
+  // The drawer is part of the page's identity here — an open task owns the
+  // tab title, and falls back to the list once it closes (or if the open
+  // task is not in the current filter).
+  const openTaskTitle = tasks?.find((t) => t.id === openTaskId)?.title;
+  useDocumentTitle(openTaskTitle ?? "All work");
 
   const openTask = useCallback(
     (boardSlug: string, taskId: string) => {

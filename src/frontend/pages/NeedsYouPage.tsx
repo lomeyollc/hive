@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PriorityBadge } from "@/components/boards/PriorityBadge";
 import { AlertTriangle } from "lucide-react";
 import { CrossBoardTaskSheet } from "@/components/boards/CrossBoardTaskSheet";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -51,6 +52,10 @@ export function NeedsYouPage() {
 
   const openTaskId = params.get("task");
   const openTaskBoard = params.get("task_board");
+
+  // An open drawer owns the tab title, same as on /all.
+  const openTaskTitle = items?.find((i) => i.id === openTaskId)?.title;
+  useDocumentTitle(openTaskTitle ?? "Needs you");
 
   // A real history entry, so Back closes the drawer and returns to the queue.
   const openTask = useCallback(
