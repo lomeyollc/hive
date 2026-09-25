@@ -7,10 +7,12 @@ import {
   ConflictError,
   closeFocus,
   getActiveFocus,
+  getFocusById,
   setMetric,
   startFocus,
   toWire as focusToWire,
 } from "../focus/focus";
+import type { FocusRow } from "../focus/focus";
 
 /**
  * Env slice the tools need. Kept narrow (rather than importing the global
@@ -102,7 +104,7 @@ function actorFor(token: AuthedToken): string {
  * verbatim (rather than throwing) because that's what every call site here
  * already does with create_board's inline version.
  */
-async function resolveWorkspace(
+export async function resolveWorkspace(
   env: McpEnv,
   token: AuthedToken,
   workspaceId: string | undefined,
@@ -140,6 +142,61 @@ async function resolveWorkspace(
     };
   }
   return { workspaceId: ids[0] };
+}
+
+/**
+ * Gate + focus resolution shared by `update_focus_metric` and `close_focus`
+ * — both act on a Focus by id rather than a board slug, so they need their
+ * own membership check (there's no board row to hang `requireBoardAccess`
+ * off of). Per the ruling that closed this gap: no `focusId` means "the
+ * active Focus of the resolved workspace" (via `resolveWorkspace`, same
+ * rule as every other tool); a given `focusId` is loaded directly and its
+ * *own* workspace must be an active membership of `token.createdBy` — and
+ * must match `workspaceId` when the caller also passed one. A focus that
+ * exists but belongs to a workspace the caller isn't in returns the same
+ * "not found" text as a genuinely missing id, so a guessed id can't be
+ * used to probe for another workspace's Focus.
+ */
+export async function resolveFocusForWrite(
+  env: McpEnv,
+  token: AuthedToken,
+  workspaceId: string | undefined,
+  focusId: string | undefined,
+  toolName: string,
+): Promise<{ focus: FocusRow } | { error: string }> {
+  if (!token.createdBy) {
+    return { error: `${toolName} failed: this token has no owner, so no workspace can be resolved` };
+  }
+
+  if (focusId) {
+    const focus = await getFocusById(env.DB, focusId);
+    const notFound = { error: `${toolName} failed: focus "${focusId}" not found` };
+    if (!focus) {
+      return notFound;
+    }
+    const member = await env.DB.prepare(
+      `SELECT 1 FROM workspace_members WHERE workspace_id = ? AND email = ? AND status = 'active' LIMIT 1`
+    )
+      .bind(focus.workspace_id, token.createdBy)
+      .first();
+    if (!member) {
+      return notFound; // exists, but the caller isn't a member — same text as "doesn't exist"
+    }
+    if (workspaceId?.trim() && workspaceId.trim() !== focus.workspace_id) {
+      return notFound;
+    }
+    return { focus };
+  }
+
+  const resolved = await resolveWorkspace(env, token, workspaceId, toolName);
+  if ("error" in resolved) {
+    return resolved;
+  }
+  const active = await getActiveFocus(env.DB, resolved.workspaceId);
+  if (!active) {
+    return { error: `${toolName} failed: no active focus in workspace "${resolved.workspaceId}"` };
+  }
+  return { focus: active };
 }
 
 /**
@@ -747,17 +804,28 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
       description:
         "Push a number toward a Focus's metric — the path products/agents use to report progress. " +
         "Upserts by label: the first call for a new label needs `target`; later calls can pass " +
-        "just `current`. Call get_active_focus first to get the focus_id.",
+        "just `current`. Omit `focus_id` to act on the active Focus of your workspace (resolved " +
+        "like create_board — pass `workspace_id` only if you belong to more than one). Pass " +
+        "`focus_id` to target a specific Focus by id instead; you must be an active member of " +
+        "its workspace.",
       inputSchema: {
-        focus_id: z.string(),
+        focus_id: z.string().optional().describe("Omit to use the active Focus of the resolved workspace."),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe("Only needed when you are an active member of more than one workspace."),
         label: z.string().min(1).describe("e.g. \"Signups from strangers\""),
         current: z.number().optional(),
         target: z.number().optional().describe("Required the first time this label is used on this focus."),
       },
     },
-    async ({ focus_id, label, current, target }) => {
+    async ({ focus_id, workspace_id, label, current, target }) => {
       try {
-        const metric = await setMetric(env.DB, focus_id, label, { current, target }, actorFor(token));
+        const resolved = await resolveFocusForWrite(env, token, workspace_id, focus_id, "update_focus_metric");
+        if ("error" in resolved) {
+          return err(resolved.error);
+        }
+        const metric = await setMetric(env.DB, resolved.focus.id, label, { current, target }, actorFor(token));
         return ok(metric);
       } catch (e) {
         return err(`update_focus_metric failed: ${(e as Error).message}`);
@@ -771,16 +839,27 @@ export function registerTools(server: McpServer, env: McpEnv, token: AuthedToken
       title: "Close Focus",
       description:
         "Close the active Focus and record what happened, freeing the workspace to start a new " +
-        "one. This is what turns closed Focuses into the weekly review history.",
+        "one. This is what turns closed Focuses into the weekly review history. Omit `focus_id` " +
+        "to close the active Focus of your workspace (resolved like create_board — pass " +
+        "`workspace_id` only if you belong to more than one). Pass `focus_id` to close a " +
+        "specific Focus by id instead; you must be an active member of its workspace.",
       inputSchema: {
-        focus_id: z.string(),
+        focus_id: z.string().optional().describe("Omit to use the active Focus of the resolved workspace."),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe("Only needed when you are an active member of more than one workspace."),
         status: z.enum(["hit", "missed", "parked"]),
         lesson: z.string().optional().describe("What to remember for next time."),
       },
     },
-    async ({ focus_id, status, lesson }) => {
+    async ({ focus_id, workspace_id, status, lesson }) => {
       try {
-        const row = await closeFocus(env.DB, focus_id, status, lesson);
+        const resolved = await resolveFocusForWrite(env, token, workspace_id, focus_id, "close_focus");
+        if ("error" in resolved) {
+          return err(resolved.error);
+        }
+        const row = await closeFocus(env.DB, resolved.focus.id, status, lesson);
         return ok({ focus: await focusToWire(env.DB, row) });
       } catch (e) {
         return err(`close_focus failed: ${(e as Error).message}`);
