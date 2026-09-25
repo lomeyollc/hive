@@ -198,7 +198,9 @@ export function DocsPage() {
               <code>list_tasks</code>, <code>list_boards</code>, <code>create_board</code>,{" "}
               <code>list_activity</code>,{" "}
               <code>search</code>, <code>list_columns</code>, <code>create_column</code>,{" "}
-              <code>update_column</code>, <code>delete_column</code>, <code>reorder_columns</code>.
+              <code>update_column</code>, <code>delete_column</code>, <code>reorder_columns</code>,{" "}
+              <code>get_active_focus</code>, <code>start_focus</code>, <code>update_focus_metric</code>,{" "}
+              <code>close_focus</code>.
               Call <code>tools/list</code> for the exact input schema of each — don't guess field
               names, they're all snake_case and some are optional.
             </p>

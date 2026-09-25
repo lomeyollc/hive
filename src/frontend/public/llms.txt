@@ -29,7 +29,8 @@ Tools exposed: create_task, get_task, update_task, delete_task,
 claim_next_task, comment_task, list_tasks, list_boards, create_board,
 list_activity,
 search, list_columns, create_column, update_column, delete_column,
-reorder_columns. Each tool's full input schema is served by the MCP server
+reorder_columns, get_active_focus, start_focus, update_focus_metric,
+close_focus. Each tool's full input schema is served by the MCP server
 itself via `tools/list` — call that instead of guessing field names.
 
 A task's `status` is a per-board column id, not a fixed enum — every board

@@ -29,3 +29,4 @@ Tools, each backed by RPC calls into the relevant board's `BoardDO`:
 - `list_tasks` (filter by board/status/assignee/label)
 - `list_boards` — reads D1's `boards` table directly, no DO call
 - `create_board` — inserts the board row, then touches the DO so its default columns get seeded. Resolves the workspace automatically when the token owner belongs to exactly one. Deleting a board stays dashboard-only.
+- `get_active_focus` / `start_focus` / `update_focus_metric` / `close_focus` — read D1's `focuses`/`focus_metrics` tables via `../focus/focus.ts`, no DO call. Workspace resolution is the same helper `create_board` uses (`resolveWorkspace` in `tools.ts`). See `docs/superpowers/specs/2026-09-25-focus-design.md`.
