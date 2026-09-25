@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { updateTask } from "@/lib/api";
 import type { RecurrenceInterval, Task, TaskPriority } from "@/lib/types";
@@ -54,6 +54,20 @@ export function EditTaskDialog({
   const [partOfFocus, setPartOfFocus] = useState(
     activeFocus ? task.labels.includes(activeFocus.task_label) : false,
   );
+
+  // In controlled mode (TaskDetailSheet) the parent flips `open` directly, so
+  // Radix's onOpenChange never fires and openWithFreshValues never runs. That
+  // left this checkbox stuck at its mount-time value — stale if the dialog
+  // opened before GET /api/focus resolved, or if the sheet moved to another
+  // task. Re-derive it whenever the dialog opens, the task changes, or the
+  // active Focus's label becomes known. When activeFocus is still null
+  // (unknown), this intentionally does nothing, so an existing focus:<id>
+  // label already present in the labels field is never stripped on save.
+  useEffect(() => {
+    if (!open) return;
+    setPartOfFocus(activeFocus ? task.labels.includes(activeFocus.task_label) : false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, task.id, activeFocus?.task_label]);
 
   function openWithFreshValues(next: boolean) {
     if (next) {
