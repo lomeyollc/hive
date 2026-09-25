@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { ApiError, startFocus } from "@/lib/api";
+import { endOfDayLocalIso } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -62,6 +63,15 @@ export function StartFocusDialog({
       toast.error("End date is required");
       return;
     }
+    // A row with a label but a blank/non-numeric target used to be dropped
+    // silently on submit instead of blocking it — the user would think the
+    // metric was saved. Reject it instead of filtering it out.
+    for (const m of metrics) {
+      if (m.label.trim() && !Number.isFinite(Number(m.target.trim() === "" ? NaN : m.target))) {
+        toast.error(`Metric "${m.label.trim()}" needs a numeric target`);
+        return;
+      }
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -73,9 +83,9 @@ export function StartFocusDialog({
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean),
-        ends_at: new Date(endsAt).toISOString(),
+        ends_at: endOfDayLocalIso(endsAt),
         metrics: metrics
-          .filter((m) => m.label.trim() && m.target.trim())
+          .filter((m) => m.label.trim())
           .map((m) => ({ label: m.label.trim(), target: Number(m.target) })),
       });
       toast.success("Focus started");

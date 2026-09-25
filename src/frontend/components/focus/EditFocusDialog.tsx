@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { ApiError, updateFocus } from "@/lib/api";
 import type { Focus } from "@/lib/types";
+import { endOfDayLocalIso } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +27,11 @@ export function EditFocusDialog({ focus, onUpdated }: { focus: Focus; onUpdated:
   const [why, setWhy] = useState(focus.why ?? "");
   const [notList, setNotList] = useState(focus.not_list.join("\n"));
   const [endsAt, setEndsAt] = useState(focus.ends_at.slice(0, 10));
+  // The date the dialog opened with, so we can tell whether the user actually
+  // touched the end date. An agent may have set a precise `ends_at` time via
+  // MCP; re-sending it cut to the date on every unrelated edit (e.g. title)
+  // would silently drop that precision.
+  const [initialEndsAt, setInitialEndsAt] = useState(focus.ends_at.slice(0, 10));
   const [error, setError] = useState<string | null>(null);
 
   function openWithFreshValues(next: boolean) {
@@ -34,6 +40,7 @@ export function EditFocusDialog({ focus, onUpdated }: { focus: Focus; onUpdated:
       setWhy(focus.why ?? "");
       setNotList(focus.not_list.join("\n"));
       setEndsAt(focus.ends_at.slice(0, 10));
+      setInitialEndsAt(focus.ends_at.slice(0, 10));
       setError(null);
     }
     setOpen(next);
@@ -55,7 +62,7 @@ export function EditFocusDialog({ focus, onUpdated }: { focus: Focus; onUpdated:
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean),
-        ends_at: endsAt ? new Date(endsAt).toISOString() : undefined,
+        ends_at: endsAt && endsAt !== initialEndsAt ? endOfDayLocalIso(endsAt) : undefined,
       });
       toast.success("Focus updated");
       onUpdated();
