@@ -139,6 +139,44 @@ export interface CreatedApiToken {
   token: string;
 }
 
+/**
+ * The one thing a workspace is pushing on right now (see
+ * docs/superpowers/specs/2026-09-25-focus-design.md and
+ * src/worker/focus/focus.ts's `Focus`, which this mirrors field-for-field).
+ */
+export type FocusStatus = "active" | "hit" | "missed" | "parked";
+
+export interface FocusMetric {
+  id: string;
+  label: string;
+  target: number;
+  current: number;
+  position: number;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface Focus {
+  id: string;
+  workspace_id: string;
+  title: string;
+  why: string | null;
+  not_list: string[];
+  starts_at: string;
+  ends_at: string;
+  status: FocusStatus;
+  lesson: string | null;
+  created_by: string | null;
+  created_at: string;
+  closed_at: string | null;
+  metrics: FocusMetric[];
+  progress: { total: number; done: number };
+  days_left: number;
+  overdue: boolean;
+  /** The label to add to a task (`focus:<id>`) to count it toward this Focus. */
+  task_label: string;
+}
+
 /** Live-update messages broadcast by a BoardDO over its /ws/boards/:slug socket. */
 export type BoardSocketMessage =
   | { type: "task.created"; task: Task }

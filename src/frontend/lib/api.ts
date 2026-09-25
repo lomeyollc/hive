@@ -48,6 +48,8 @@ import type {
   Comment,
   CreatedApiToken,
   CurrentUser,
+  Focus,
+  FocusStatus,
   RecurrenceInterval,
   Task,
   TaskPriority,
@@ -146,6 +148,58 @@ export async function createApiToken(label: string): Promise<CreatedApiToken> {
 
 export async function revokeApiToken(id: string): Promise<void> {
   await request<void>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Focus — see src/worker/focus/focus.ts and the REST routes in
+// src/worker/api/routes.ts's "Focus (D1)" section, which this mirrors.
+// ---------------------------------------------------------------------------
+
+export async function getFocus(workspaceId: string): Promise<{ active: Focus | null; past: Focus[] }> {
+  return request<{ active: Focus | null; past: Focus[] }>(
+    `/api/focus?workspace_id=${encodeURIComponent(workspaceId)}`,
+  );
+}
+
+export interface StartFocusInput {
+  workspace_id: string;
+  title: string;
+  why?: string;
+  not_list?: string[];
+  ends_at: string;
+  metrics?: { label: string; target: number }[];
+}
+
+export async function startFocus(input: StartFocusInput): Promise<Focus> {
+  const data = await request<{ focus: Focus }>("/api/focus", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.focus;
+}
+
+export interface UpdateFocusInput {
+  title?: string;
+  why?: string;
+  not_list?: string[];
+  ends_at?: string;
+  metrics?: { label: string; target?: number; current?: number }[];
+}
+
+export async function updateFocus(id: string, patch: UpdateFocusInput): Promise<Focus> {
+  const data = await request<{ focus: Focus }>(`/api/focus/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return data.focus;
+}
+
+export async function closeFocus(id: string, status: FocusStatus, lesson?: string): Promise<Focus> {
+  const data = await request<{ focus: Focus }>(`/api/focus/${encodeURIComponent(id)}/close`, {
+    method: "POST",
+    body: JSON.stringify({ status, lesson }),
+  });
+  return data.focus;
 }
 
 // ---------------------------------------------------------------------------
