@@ -36,7 +36,7 @@ export function EditTaskDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { active: activeFocus } = useFocus();
+  const { active: activeFocus, refresh: refreshFocus } = useFocus();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const controlled = controlledOpen !== undefined;
   const open = controlled ? controlledOpen : uncontrolledOpen;
@@ -104,6 +104,10 @@ export function EditTaskDialog({
       });
       toast.success("Task updated");
       onUpdated(updated);
+      // Same as CreateTaskDialog — the task's status/label change can move
+      // the Focus's task progress count, so always refresh rather than only
+      // when the focus label itself changed.
+      void refreshFocus();
       setOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update task");

@@ -31,7 +31,7 @@ export function CreateTaskDialog({
   onCreated: (task: Task) => void;
 }) {
   const defaultColumnId = () => columns.find((c) => c.role === "open")?.id ?? columns[0]?.id ?? "";
-  const { active: activeFocus } = useFocus();
+  const { active: activeFocus, refresh: refreshFocus } = useFocus();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState("");
@@ -89,6 +89,10 @@ export function CreateTaskDialog({
       });
       toast.success(needsHuman ? "Task created — pinged you on Telegram" : "Task created");
       onCreated(task);
+      // Task progress on the banner/FocusPage is a D1 count, not pushed by this
+      // response — refresh unconditionally so a newly-labeled (or unlabeled)
+      // task's effect on progress/done counts shows immediately.
+      void refreshFocus();
       reset();
       setOpen(false);
     } catch (err) {
