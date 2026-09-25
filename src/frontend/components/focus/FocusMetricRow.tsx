@@ -18,6 +18,13 @@ export function FocusMetricRow({ focusId, metric, onUpdated }: { focusId: string
   const pct = metric.target > 0 ? Math.min(100, Math.round((metric.current / metric.target) * 100)) : 0;
 
   async function save() {
+    // `Number("")` is `0`, a valid finite number — so an emptied input would
+    // otherwise silently save 0 instead of being rejected. Reject blank
+    // input explicitly before the numeric parse.
+    if (current.trim() === "" || target.trim() === "") {
+      toast.error("Enter numbers for both current and target");
+      return;
+    }
     const currentNum = Number(current);
     const targetNum = Number(target);
     if (!Number.isFinite(currentNum) || !Number.isFinite(targetNum)) {
