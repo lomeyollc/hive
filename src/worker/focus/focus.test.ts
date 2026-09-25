@@ -106,6 +106,37 @@ describe("startFocus", () => {
     expect(wire.metrics).toHaveLength(1);
     expect(wire.metrics[0]).toMatchObject({ label: "Signups", target: 20, current: 0 });
   });
+
+  it("rejects duplicate metric labels with a validation error, not a false active-focus conflict", async () => {
+    // Regression: this workspace has no active focus at all, so if the old
+    // code path (catch-any-UNIQUE-violation) were still in place, this
+    // would incorrectly surface as ConflictError("already has an active
+    // focus") instead of the real problem — two metrics sharing a label.
+    await makeWorkspace("ws-dup-labels");
+    await expect(
+      startFocus(DB(), "ws-dup-labels", {
+        title: "dup metrics",
+        endsAt: future(7),
+        metrics: [
+          { label: "Signups", target: 20 },
+          { label: "Signups", target: 30 },
+        ],
+      }),
+    ).rejects.toThrow(/duplicate metric label/);
+
+    // And the workspace must still be free to start a focus afterward —
+    // proof no row was left behind by the rejected attempt.
+    expect(await getActiveFocus(DB(), "ws-dup-labels")).toBeNull();
+  });
+
+  it("a real active-focus conflict still maps to ConflictError, not a validation error", async () => {
+    await makeWorkspace("ws-real-conflict");
+    await startFocus(DB(), "ws-real-conflict", { title: "first", endsAt: future(7) });
+
+    await expect(
+      startFocus(DB(), "ws-real-conflict", { title: "second", endsAt: future(7) }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
 });
 
 describe("setMetric", () => {
@@ -130,6 +161,29 @@ describe("setMetric", () => {
     await makeWorkspace("ws-metric-no-target");
     const focus = await startFocus(DB(), "ws-metric-no-target", { title: "t", endsAt: future(7) });
     await expect(setMetric(DB(), focus.id, "new metric", { current: 1 })).rejects.toThrow(/needs a target/);
+  });
+
+  it("rejects non-finite current/target — the guard REST's raw JSON body needs", async () => {
+    await makeWorkspace("ws-metric-non-numeric");
+    const focus = await startFocus(DB(), "ws-metric-non-numeric", { title: "t", endsAt: future(7) });
+
+    // Simulates what a hand-typed PATCH /api/focus/:id body can send —
+    // routes.ts forwards parsed JSON straight through, with no zod schema
+    // in front of it the way the MCP tool has.
+    await expect(
+      setMetric(DB(), focus.id, "bad target", { target: "abc" as unknown as number }),
+    ).rejects.toThrow(/finite number/);
+    await expect(
+      setMetric(DB(), focus.id, "bad target", { target: Number.NaN }),
+    ).rejects.toThrow(/finite number/);
+    await expect(
+      setMetric(DB(), focus.id, "bad target", { target: null as unknown as number }),
+    ).rejects.toThrow(/finite number/);
+
+    await setMetric(DB(), focus.id, "ok target", { target: 10 });
+    await expect(
+      setMetric(DB(), focus.id, "ok target", { current: "12" as unknown as number }),
+    ).rejects.toThrow(/finite number/);
   });
 });
 

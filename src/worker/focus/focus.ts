@@ -179,6 +179,36 @@ export async function startFocus(
   }
   assertEndsAfterStarts(startsAt, endsAt);
 
+  // Validated up front, and independently of the DB round-trip below, so a
+  // caller mistake (two metrics with the same label) is never mistaken for
+  // the one-active-per-workspace conflict — both would otherwise hit a
+  // UNIQUE violation at insert time and be indistinguishable by message.
+  const metrics = input.metrics ?? [];
+  const seenLabels = new Set<string>();
+  for (const m of metrics) {
+    const label = m.label?.trim();
+    if (!label) {
+      throw new ValidationError("every metric needs a label");
+    }
+    if (typeof m.target !== "number" || !Number.isFinite(m.target)) {
+      throw new ValidationError(`metric "${m.label}" needs a numeric target`);
+    }
+    if (seenLabels.has(label)) {
+      throw new ValidationError(`duplicate metric label "${label}" — labels must be unique on a focus`);
+    }
+    seenLabels.add(label);
+  }
+
+  // Checked explicitly (rather than relying solely on the UNIQUE violation
+  // below) so the common case returns a clean ConflictError without ever
+  // reaching the DB write; the index itself remains the race backstop for
+  // two concurrent starts, which is the only remaining way this INSERT can
+  // hit "UNIQUE constraint failed" now that duplicate labels are rejected
+  // above.
+  if (await getActiveFocus(db, workspaceId)) {
+    throw new ConflictError(`workspace "${workspaceId}" already has an active focus`);
+  }
+
   const id = newFocusId();
   const createdAt = new Date().toISOString();
   const notList = JSON.stringify(input.notList ?? []);
@@ -192,21 +222,15 @@ export async function startFocus(
       .bind(id, workspaceId, title, input.why?.trim() || null, notList, startsAt, endsAt, actor ?? null, createdAt),
   ];
 
-  const metrics = input.metrics ?? [];
   metrics.forEach((m, i) => {
-    if (!m.label?.trim()) {
-      throw new ValidationError("every metric needs a label");
-    }
-    if (typeof m.target !== "number" || !Number.isFinite(m.target)) {
-      throw new ValidationError(`metric "${m.label}" needs a numeric target`);
-    }
+    const label = m.label.trim();
     statements.push(
       db
         .prepare(
           `INSERT INTO focus_metrics (id, focus_id, label, target, current, position, updated_by, updated_at)
            VALUES (?, ?, ?, ?, 0, ?, ?, ?)`,
         )
-        .bind(crypto.randomUUID(), id, m.label.trim(), m.target, i, actor ?? null, createdAt),
+        .bind(crypto.randomUUID(), id, label, m.target, i, actor ?? null, createdAt),
     );
   });
 
@@ -312,6 +336,18 @@ export async function setMetric(
   const trimmedLabel = label?.trim();
   if (!trimmedLabel) {
     throw new ValidationError("label is required");
+  }
+
+  // Zod covers this on the MCP path, but REST's `PATCH /api/focus/:id`
+  // forwards raw parsed JSON (see routes.ts) — a string, null, or NaN would
+  // otherwise land straight into a REAL column. `values` is typed
+  // `number | undefined` at compile time, but nothing enforces that at
+  // the JSON boundary, hence the explicit runtime check here rather than
+  // trusting the type.
+  for (const [field, value] of Object.entries(values) as ["current" | "target", unknown][]) {
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
+      throw new ValidationError(`metric "${trimmedLabel}" ${field} must be a finite number`);
+    }
   }
 
   const existing = await db
