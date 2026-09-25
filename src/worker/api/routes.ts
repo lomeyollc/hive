@@ -11,6 +11,18 @@ import type {
   UpdateTaskInput as DoUpdateTaskInput,
 } from "../durable-objects/types";
 import { NotFoundError, ValidationError } from "../durable-objects/types";
+import {
+  ConflictError,
+  closeFocus,
+  getActiveFocus,
+  getFocusById,
+  listFocuses,
+  setMetric,
+  startFocus,
+  toWire as focusToWire,
+  updateFocus,
+} from "../focus/focus";
+import type { FocusStatus } from "../focus/focus";
 
 /**
  * Handles every `/api/*` request — the REST surface behind the React
@@ -82,6 +94,22 @@ import { NotFoundError, ValidationError } from "../durable-objects/types";
  *          Cross-board (workspace-scoped) substring search over task
  *          title/description and comment body. Reads tasks_index and the
  *          new comments_index mirror — never opens a Durable Object.
+ *   GET    /api/focus  ?workspace_id=            -> { active: Focus | null, past: Focus[] }
+ *          workspace_id is required; caller must be an active member of it.
+ *          past is closed Focuses (any non-active status), newest-closed
+ *          first, capped at 20. See ../focus/focus.ts for the Focus shape.
+ *   POST   /api/focus  { workspace_id, title, why?, not_list?, starts_at?,
+ *                         ends_at, metrics? }    -> { focus: Focus } (201)
+ *          409 if the workspace already has an active Focus (one active
+ *          per workspace, enforced by a D1 partial unique index).
+ *   PATCH  /api/focus/:id  { title?, why?, not_list?, ends_at?, metrics? }
+ *                                                -> { focus: Focus }
+ *          metrics (optional) is [{label, target}] — upserts each metric's
+ *          target via the same path update_focus_metric/setMetric uses.
+ *   POST   /api/focus/:id/close  { status, lesson? }
+ *                                                -> { focus: Focus }
+ *          status is one of hit|missed|parked. Frees the workspace's active
+ *          slot for a new Focus.
  *   GET    /api/boards                          -> { boards: Board[] }
  *          Scoped to workspaces the caller is an active member of.
  *   POST   /api/boards            { id, name, description?, workspace_id }
@@ -168,6 +196,23 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     // /api/search — cross-board task + comment search. ?q=
     if (parts.length === 2 && parts[1] === "search" && request.method === "GET") {
       return await searchWorkspace(env, session.email, url.searchParams);
+    }
+
+    // /api/focus — workspace_id is required and checked inline (unlike the
+    // board routes, there's no slug to gate on ahead of the dispatcher).
+    if (parts.length === 2 && parts[1] === "focus") {
+      if (request.method === "GET") return await getFocus(env, session.email, url.searchParams);
+      if (request.method === "POST") return await createFocus(request, env, session.email);
+    }
+
+    // /api/focus/:id
+    if (parts.length === 3 && parts[1] === "focus" && request.method === "PATCH") {
+      return await patchFocus(request, env, session.email, parts[2]);
+    }
+
+    // /api/focus/:id/close
+    if (parts.length === 4 && parts[1] === "focus" && parts[3] === "close" && request.method === "POST") {
+      return await postCloseFocus(request, env, session.email, parts[2]);
     }
 
     // /api/workspaces
@@ -270,6 +315,9 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     }
     if (error instanceof ValidationError) {
       return json({ error: error.message }, 400);
+    }
+    if (error instanceof ConflictError) {
+      return json({ error: error.message }, 409);
     }
     console.error("API error:", error);
     return json({ error: "Internal error" }, 500);
@@ -637,6 +685,121 @@ async function searchWorkspace(env: Env, email: string, params: URLSearchParams)
   ]);
 
   return json({ tasks: taskRows.results ?? [], comments: commentRows.results ?? [] });
+}
+
+// ── Focus (D1) ─────────────────────────────────────────────────────────────
+//
+// A Focus is the one thing a workspace is pushing on right now — see
+// docs/superpowers/specs/2026-09-25-focus-design.md and ../focus/focus.ts
+// (the shared D1 module both this REST surface and the MCP tools call).
+
+async function getFocus(env: Env, email: string, params: URLSearchParams): Promise<Response> {
+  const workspaceId = params.get("workspace_id")?.trim();
+  if (!workspaceId) {
+    throw new ValidationError("workspace_id is required");
+  }
+  if (!(await isActiveMember(env, workspaceId, email))) {
+    throw new ValidationError(`not a member of workspace "${workspaceId}"`);
+  }
+
+  const [activeRow, pastRows] = await Promise.all([
+    getActiveFocus(env.DB, workspaceId),
+    listFocuses(env.DB, workspaceId),
+  ]);
+
+  const [active, past] = await Promise.all([
+    activeRow ? focusToWire(env.DB, activeRow) : Promise.resolve(null),
+    Promise.all(pastRows.map((row) => focusToWire(env.DB, row))),
+  ]);
+
+  return json({ active, past });
+}
+
+interface WireStartFocusInput {
+  workspace_id?: string;
+  title?: string;
+  why?: string;
+  not_list?: string[];
+  starts_at?: string;
+  ends_at?: string;
+  metrics?: { label: string; target: number }[];
+}
+
+async function createFocus(request: Request, env: Env, email: string): Promise<Response> {
+  const body = await readJson<WireStartFocusInput>(request);
+  const workspaceId = body.workspace_id?.trim();
+  if (!workspaceId) {
+    throw new ValidationError("workspace_id is required");
+  }
+  if (!(await isActiveMember(env, workspaceId, email))) {
+    throw new ValidationError(`not a member of workspace "${workspaceId}"`);
+  }
+  if (!body.title?.trim()) {
+    throw new ValidationError("title is required");
+  }
+  if (!body.ends_at) {
+    throw new ValidationError("ends_at is required");
+  }
+
+  const row = await startFocus(
+    env.DB,
+    workspaceId,
+    {
+      title: body.title,
+      why: body.why,
+      notList: body.not_list,
+      startsAt: body.starts_at,
+      endsAt: body.ends_at,
+      metrics: body.metrics,
+    },
+    email,
+  );
+  return json({ focus: await focusToWire(env.DB, row) }, 201);
+}
+
+/** Gate shared by PATCH /api/focus/:id and POST /api/focus/:id/close. */
+async function requireFocusWorkspace(env: Env, id: string, email: string): Promise<void> {
+  const existing = await getFocusById(env.DB, id);
+  if (!existing || !(await isActiveMember(env, existing.workspace_id, email))) {
+    throw new NotFoundError(`focus "${id}" not found`);
+  }
+}
+
+interface WireUpdateFocusInput {
+  title?: string;
+  why?: string;
+  not_list?: string[];
+  ends_at?: string;
+  metrics?: { label: string; target?: number; current?: number }[];
+}
+
+async function patchFocus(request: Request, env: Env, email: string, id: string): Promise<Response> {
+  await requireFocusWorkspace(env, id, email);
+  const body = await readJson<WireUpdateFocusInput>(request);
+
+  const row = await updateFocus(env.DB, id, {
+    title: body.title,
+    why: body.why,
+    notList: body.not_list,
+    endsAt: body.ends_at,
+  });
+
+  for (const metric of body.metrics ?? []) {
+    await setMetric(env.DB, id, metric.label, { target: metric.target, current: metric.current }, email);
+  }
+
+  return json({ focus: await focusToWire(env.DB, row) });
+}
+
+async function postCloseFocus(request: Request, env: Env, email: string, id: string): Promise<Response> {
+  await requireFocusWorkspace(env, id, email);
+  const body = await readJson<{ status?: FocusStatus; lesson?: string }>(request);
+  if (body.status !== "hit" && body.status !== "missed" && body.status !== "parked") {
+    throw new ValidationError('status must be one of "hit", "missed", "parked"');
+  }
+
+  const row = await closeFocus(env.DB, id, body.status, body.lesson);
+  return json({ focus: await focusToWire(env.DB, row) });
 }
 
 // ── Workspaces (D1) ───────────────────────────────────────────────────────
