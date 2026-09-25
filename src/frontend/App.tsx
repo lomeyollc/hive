@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/context/auth-context";
 import { WorkspaceProvider } from "@/context/workspace-context";
+import { FocusProvider } from "@/context/focus-context";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/pages/LoginPage";
@@ -12,6 +13,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { WorkspacePage } from "@/pages/WorkspacePage";
 import { NeedsYouPage } from "@/pages/NeedsYouPage";
 import { ActivityPage } from "@/pages/ActivityPage";
+import { FocusPage } from "@/pages/FocusPage";
 import { AcceptInvitePage } from "@/pages/AcceptInvitePage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
@@ -38,6 +40,8 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
  *                          grouped by board (protected) — the nav badge's
  *                          landing page
  *   /activity            - cross-board activity feed + search (protected)
+ *   /focus                - the active Focus (start/edit/close, metrics, NOT
+ *                          list) + a history of past ones (protected)
  *   /workspace           - members list + invite dialog (protected)
  *   /invites/:token       - accept-invite landing page (PUBLIC — an invited
  *                          user has no session yet). Sign in with Google,
@@ -60,7 +64,9 @@ export default function App() {
           <Route
             element={
               <WorkspaceProvider>
-                <AppShell />
+                <FocusProvider>
+                  <AppShell />
+                </FocusProvider>
               </WorkspaceProvider>
             }
           >
@@ -71,6 +77,7 @@ export default function App() {
             <Route path="/workspace" element={<WorkspacePage />} />
             <Route path="/needs-you" element={<NeedsYouPage />} />
             <Route path="/activity" element={<ActivityPage />} />
+            <Route path="/focus" element={<FocusPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Route>
