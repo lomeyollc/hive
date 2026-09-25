@@ -17,7 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Pencil, AlertTriangle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Pencil, AlertTriangle, Target } from "lucide-react";
+import { useFocus } from "@/context/focus-context";
 
 export function EditTaskDialog({
   boardSlug,
@@ -34,6 +36,7 @@ export function EditTaskDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const { active: activeFocus } = useFocus();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const controlled = controlledOpen !== undefined;
   const open = controlled ? controlledOpen : uncontrolledOpen;
@@ -48,6 +51,9 @@ export function EditTaskDialog({
   const [needsHuman, setNeedsHuman] = useState(task.needs_human);
   const [needsHumanReason, setNeedsHumanReason] = useState(task.needs_human_reason ?? "");
   const [recurrence, setRecurrence] = useState<RecurrenceInterval | "none">(task.recurrence ?? "none");
+  const [partOfFocus, setPartOfFocus] = useState(
+    activeFocus ? task.labels.includes(activeFocus.task_label) : false,
+  );
 
   function openWithFreshValues(next: boolean) {
     if (next) {
@@ -60,6 +66,7 @@ export function EditTaskDialog({
       setNeedsHuman(task.needs_human);
       setNeedsHumanReason(task.needs_human_reason ?? "");
       setRecurrence(task.recurrence ?? "none");
+      setPartOfFocus(activeFocus ? task.labels.includes(activeFocus.task_label) : false);
     }
     setOpen(next);
   }
@@ -72,15 +79,24 @@ export function EditTaskDialog({
     }
     setSubmitting(true);
     try {
+      const labelList = labels
+        .split(",")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (activeFocus) {
+        const idx = labelList.indexOf(activeFocus.task_label);
+        if (partOfFocus && idx === -1) {
+          labelList.push(activeFocus.task_label);
+        } else if (!partOfFocus && idx !== -1) {
+          labelList.splice(idx, 1);
+        }
+      }
       const updated = await updateTask(boardSlug, task.id, {
         title: title.trim(),
         description: description.trim(),
         priority,
         assignee: assignee.trim(),
-        labels: labels
-          .split(",")
-          .map((l) => l.trim())
-          .filter(Boolean),
+        labels: labelList,
         due_date: dueDate,
         needs_human: needsHuman,
         needs_human_reason: needsHuman ? needsHumanReason.trim() : "",
@@ -186,6 +202,16 @@ export function EditTaskDialog({
                 placeholder="bug, backend (comma-separated)"
               />
             </div>
+
+            {activeFocus && (
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={partOfFocus} onCheckedChange={(v) => setPartOfFocus(v === true)} />
+                <span className="flex items-center gap-1.5">
+                  <Target className="size-3.5 text-muted-foreground" />
+                  Part of current Focus ({activeFocus.title})
+                </span>
+              </label>
+            )}
 
             <div className="flex flex-col gap-1.5 rounded-md border p-3">
               <button

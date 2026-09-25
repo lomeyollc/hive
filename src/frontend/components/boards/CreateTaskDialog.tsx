@@ -17,7 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, AlertTriangle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, AlertTriangle, Target } from "lucide-react";
+import { useFocus } from "@/context/focus-context";
 
 export function CreateTaskDialog({
   boardSlug,
@@ -29,6 +31,7 @@ export function CreateTaskDialog({
   onCreated: (task: Task) => void;
 }) {
   const defaultColumnId = () => columns.find((c) => c.role === "open")?.id ?? columns[0]?.id ?? "";
+  const { active: activeFocus } = useFocus();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState("");
@@ -41,6 +44,7 @@ export function CreateTaskDialog({
   const [needsHuman, setNeedsHuman] = useState(false);
   const [needsHumanReason, setNeedsHumanReason] = useState("");
   const [recurrence, setRecurrence] = useState<RecurrenceInterval | "none">("none");
+  const [partOfFocus, setPartOfFocus] = useState(false);
 
   function reset() {
     setTitle("");
@@ -53,6 +57,7 @@ export function CreateTaskDialog({
     setNeedsHuman(false);
     setNeedsHumanReason("");
     setRecurrence("none");
+    setPartOfFocus(false);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -63,16 +68,20 @@ export function CreateTaskDialog({
     }
     setSubmitting(true);
     try {
+      const labelList = labels
+        .split(",")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (partOfFocus && activeFocus && !labelList.includes(activeFocus.task_label)) {
+        labelList.push(activeFocus.task_label);
+      }
       const task = await createTask(boardSlug, {
         title: title.trim(),
         description: description.trim() || undefined,
         status,
         priority,
         assignee: assignee.trim() || undefined,
-        labels: labels
-          .split(",")
-          .map((l) => l.trim())
-          .filter(Boolean),
+        labels: labelList,
         due_date: dueDate || undefined,
         needs_human: needsHuman || undefined,
         needs_human_reason: needsHuman ? needsHumanReason.trim() || undefined : undefined,
@@ -209,6 +218,16 @@ export function CreateTaskDialog({
                 placeholder="bug, backend (comma-separated)"
               />
             </div>
+
+            {activeFocus && (
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={partOfFocus} onCheckedChange={(v) => setPartOfFocus(v === true)} />
+                <span className="flex items-center gap-1.5">
+                  <Target className="size-3.5 text-muted-foreground" />
+                  Part of current Focus ({activeFocus.title})
+                </span>
+              </label>
+            )}
 
             <div className="flex flex-col gap-1.5 rounded-md border p-3">
               <button
