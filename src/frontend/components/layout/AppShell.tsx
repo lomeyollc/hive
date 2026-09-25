@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Settings, LogOut, LayoutGrid, ListTodo, Users, Activity, BookOpen } from "lucide-react";
+import { Settings, LogOut, LayoutGrid, ListTodo, Users, Activity, BookOpen, Target } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { HiveLogo } from "@/components/icons/HiveLogo";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { NeedsHumanBadge } from "@/components/layout/NeedsHumanBadge";
 import { WorkspaceSwitcher } from "@/components/workspace/WorkspaceSwitcher";
+import { FocusBanner } from "@/components/focus/FocusBanner";
 
 function initials(email: string) {
   return email.slice(0, 2).toUpperCase();
@@ -85,6 +86,17 @@ export function AppShell() {
                 Activity
               </NavLink>
 
+              <NavLink
+                to="/focus"
+                className={({ isActive }) =>
+                  `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`
+                }
+              >
+                Focus
+              </NavLink>
+
               <a
                 href="/docs"
                 target="_blank"
@@ -138,6 +150,12 @@ export function AppShell() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild className="sm:hidden">
+                    <Link to="/focus" className="flex items-center gap-2">
+                      <Target className="size-4" />
+                      Focus
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="sm:hidden">
                     <a href="/docs" target="_blank" rel="noreferrer" className="flex items-center gap-2">
                       <BookOpen className="size-4" />
                       Docs
@@ -160,6 +178,8 @@ export function AppShell() {
           </nav>
         </div>
       </header>
+
+      <FocusBanner />
 
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-8">
         <Outlet />
