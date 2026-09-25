@@ -725,6 +725,44 @@ interface WireStartFocusInput {
   metrics?: { label: string; target: number }[];
 }
 
+/** `not_list`, when present, must be an array of strings — members send this
+ *  over REST and a non-array/non-string item would otherwise 500 the D1
+ *  write or crash rendering on /focus. */
+function validateNotList(notList: unknown): void {
+  if (notList === undefined) return;
+  if (!Array.isArray(notList) || !notList.every((item) => typeof item === "string")) {
+    throw new ValidationError("not_list must be an array of strings");
+  }
+}
+
+/** `metrics`, when present, must be an array of objects shaped
+ *  `{label: string, target?/current?: number}` — a non-array value (e.g. a
+ *  single object) would otherwise 500 on the `for...of` loop or the D1 bind. */
+function validateMetrics(metrics: unknown, { requireTarget }: { requireTarget: boolean }): void {
+  if (metrics === undefined) return;
+  if (!Array.isArray(metrics)) {
+    throw new ValidationError("metrics must be an array");
+  }
+  for (const metric of metrics) {
+    if (typeof metric !== "object" || metric === null || Array.isArray(metric)) {
+      throw new ValidationError("each metric must be an object");
+    }
+    const m = metric as Record<string, unknown>;
+    if (typeof m.label !== "string" || !m.label.trim()) {
+      throw new ValidationError("each metric needs a non-empty string label");
+    }
+    if (requireTarget && typeof m.target !== "number") {
+      throw new ValidationError(`metric "${m.label}" needs a numeric target`);
+    }
+    if (m.target !== undefined && typeof m.target !== "number") {
+      throw new ValidationError(`metric "${m.label}" target must be a number`);
+    }
+    if (m.current !== undefined && typeof m.current !== "number") {
+      throw new ValidationError(`metric "${m.label}" current must be a number`);
+    }
+  }
+}
+
 async function createFocus(request: Request, env: Env, email: string): Promise<Response> {
   const body = await readJson<WireStartFocusInput>(request);
   const workspaceId = body.workspace_id?.trim();
@@ -740,6 +778,8 @@ async function createFocus(request: Request, env: Env, email: string): Promise<R
   if (!body.ends_at) {
     throw new ValidationError("ends_at is required");
   }
+  validateNotList(body.not_list);
+  validateMetrics(body.metrics, { requireTarget: true });
 
   const row = await startFocus(
     env.DB,
@@ -776,6 +816,8 @@ interface WireUpdateFocusInput {
 async function patchFocus(request: Request, env: Env, email: string, id: string): Promise<Response> {
   await requireFocusWorkspace(env, id, email);
   const body = await readJson<WireUpdateFocusInput>(request);
+  validateNotList(body.not_list);
+  validateMetrics(body.metrics, { requireTarget: false });
 
   const row = await updateFocus(env.DB, id, {
     title: body.title,

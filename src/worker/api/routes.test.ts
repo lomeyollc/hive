@@ -111,6 +111,26 @@ describe("POST /api/focus — the one-active-per-workspace conflict", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("returns 400, not 500, when metrics is not an array", async () => {
+    await makeWorkspace("ws-post-bad-metrics");
+    await addMember("ws-post-bad-metrics", "owner5@lomeyo.com");
+    const cookie = await sessionCookie("owner5@lomeyo.com");
+
+    const res = await SELF.fetch(`https://hive.test/api/focus`, {
+      method: "POST",
+      headers: jsonHeaders(cookie),
+      body: JSON.stringify({
+        workspace_id: "ws-post-bad-metrics",
+        title: "x",
+        ends_at: future(7),
+        metrics: { label: "not an array", target: 10 },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({ error: expect.stringContaining("metrics must be an array") });
+  });
 });
 
 describe("PATCH /api/focus/:id — cross-workspace focus id is refused", () => {
