@@ -6,25 +6,27 @@ import type { FocusMetric } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-/** One metric on the active Focus — a current/target bar with the current
- *  value inline-editable (click the pencil, type a number, save). Target is
- *  not editable here; use EditFocusDialog's metrics patch for that if needed. */
+/** One metric on the active Focus — a current/target bar with both current
+ *  and target inline-editable (click the pencil, type numbers, save). Both
+ *  go through the same `PATCH /api/focus/:id { metrics: [...] }` upsert. */
 export function FocusMetricRow({ focusId, metric, onUpdated }: { focusId: string; metric: FocusMetric; onUpdated: () => void }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(String(metric.current));
+  const [current, setCurrent] = useState(String(metric.current));
+  const [target, setTarget] = useState(String(metric.target));
   const [saving, setSaving] = useState(false);
 
   const pct = metric.target > 0 ? Math.min(100, Math.round((metric.current / metric.target) * 100)) : 0;
 
   async function save() {
-    const num = Number(value);
-    if (!Number.isFinite(num)) {
-      toast.error("Enter a number");
+    const currentNum = Number(current);
+    const targetNum = Number(target);
+    if (!Number.isFinite(currentNum) || !Number.isFinite(targetNum)) {
+      toast.error("Enter numbers for both current and target");
       return;
     }
     setSaving(true);
     try {
-      await updateFocus(focusId, { metrics: [{ label: metric.label, current: num }] });
+      await updateFocus(focusId, { metrics: [{ label: metric.label, current: currentNum, target: targetNum }] });
       onUpdated();
       setEditing(false);
     } catch (err) {
@@ -48,16 +50,29 @@ export function FocusMetricRow({ focusId, metric, onUpdated }: { focusId: string
           <Input
             autoFocus
             type="number"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void save();
               if (e.key === "Escape") setEditing(false);
             }}
             className="h-8 w-20"
             disabled={saving}
+            aria-label="Current"
           />
-          <span className="text-sm text-muted-foreground">/ {metric.target}</span>
+          <span className="text-sm text-muted-foreground">/</span>
+          <Input
+            type="number"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className="h-8 w-20"
+            disabled={saving}
+            aria-label="Target"
+          />
           <Button variant="ghost" size="icon" className="size-7" onClick={() => void save()} disabled={saving}>
             <Check className="size-3.5" />
           </Button>
@@ -70,7 +85,8 @@ export function FocusMetricRow({ focusId, metric, onUpdated }: { focusId: string
           type="button"
           className="group flex shrink-0 items-center gap-1.5 text-sm tabular-nums text-muted-foreground"
           onClick={() => {
-            setValue(String(metric.current));
+            setCurrent(String(metric.current));
+            setTarget(String(metric.target));
             setEditing(true);
           }}
         >
