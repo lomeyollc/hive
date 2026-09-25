@@ -20,6 +20,14 @@ import { defineConfig } from "vitest/config";
  * handed to the worker as a binding; `src/worker/test-setup.ts` (declared as
  * a `setupFiles` entry below, so it runs once per worker instance, inside
  * workerd) is what actually calls `applyD1Migrations` against `env.DB`.
+ *
+ * `SESSION_SECRET` is a real secret in every deployed env (`wrangler secret
+ * put`) and is never committed — locally it comes from a gitignored
+ * `.dev.vars` that doesn't exist in this worktree. Tests that drive the
+ * REST API through `SELF.fetch` with a real session cookie
+ * (`src/worker/api/routes.test.ts`) need *some* fixed value to sign/verify
+ * against, so it's set here as an ordinary test-only binding — it has no
+ * relationship to any real deployment's secret.
  */
 const migrations = await readD1Migrations("./migrations");
 
@@ -29,7 +37,7 @@ export default defineConfig({
       isolatedStorage: true,
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
-        bindings: { TEST_D1_MIGRATIONS: migrations },
+        bindings: { TEST_D1_MIGRATIONS: migrations, SESSION_SECRET: "test-only-session-secret" },
       },
     }),
   ],
